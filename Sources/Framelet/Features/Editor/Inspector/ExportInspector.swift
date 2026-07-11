@@ -40,6 +40,12 @@ struct ExportInspector: View {
                     .padding(.vertical, 4)
             }
 
+            if store.isExporting {
+                ExportProgressView(progress: store.exportProgress)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+
             VStack(spacing: 10) {
             Button {
                 store.quickExportBesideOriginal()
@@ -47,7 +53,7 @@ struct ExportInspector: View {
                 Label("Quick Export Beside Original", systemImage: "bolt.fill")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
+            .disabled(store.project.segments.filter(\.isEnabled).isEmpty || store.isExporting)
             .controlSize(.large)
             .frame(maxWidth: .infinity)
 
@@ -56,7 +62,7 @@ struct ExportInspector: View {
             } label: {
                 Label("Export to Folder…", systemImage: "square.and.arrow.up")
             }
-            .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
+            .disabled(store.project.segments.filter(\.isEnabled).isEmpty || store.isExporting)
             .frame(maxWidth: .infinity)
             }
 
@@ -88,6 +94,45 @@ struct ExportInspector: View {
     }
 }
 
+private struct ExportProgressView: View {
+    let progress: Double
+
+    private var clampedProgress: Double {
+        min(max(progress, 0), 1)
+    }
+
+    private var percentage: Int {
+        Int((clampedProgress * 100).rounded())
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .stroke(.quaternary, lineWidth: 6)
+
+                Circle()
+                    .trim(from: 0, to: clampedProgress)
+                    .stroke(
+                        Color.accentColor,
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+
+                Text("\(percentage)%")
+                    .font(.system(.caption, design: .monospaced, weight: .semibold))
+            }
+            .frame(width: 60, height: 60)
+
+            Text("Exporting")
+                .font(.headline)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Export progress")
+        .accessibilityValue("\(percentage)%")
+    }
+}
+
 private struct ExportSummaryCard: View {
     @Bindable var store: EditorStore
 
@@ -114,7 +159,7 @@ private struct ExportSummaryCard: View {
         .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func summaryItem(icon: String, value: String, label: String) -> some View {
+    private func summaryItem(icon: String, value: String, label: LocalizedStringKey) -> some View {
         VStack(spacing: 3) {
             Label(value, systemImage: icon).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
             Text(label).font(.caption).foregroundStyle(.secondary)
@@ -255,10 +300,16 @@ private struct CropExportControls: View {
                 }
 
                 Stepper(
-                    "Bitrate \(store.project.exportPreset.videoEncode.bitrateMbps) Mbps",
                     value: $store.project.exportPreset.videoEncode.bitrateMbps,
                     in: 2...80
-                )
+                ) {
+                    HStack {
+                        Text("Bitrate")
+                        Spacer()
+                        Text("\(store.project.exportPreset.videoEncode.bitrateMbps) Mbps")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
                 .disabled(store.project.exportPreset.videoEncode.codec != .h264VideoToolbox)
 
                 Text("Cropping changes picture pixels, so Framelet re-encodes video while copying other selected streams when possible.")
@@ -270,7 +321,7 @@ private struct CropExportControls: View {
 }
 
 private struct CropStepper: View {
-    var title: String
+    var title: LocalizedStringKey
     @Binding var value: Int
     var range: ClosedRange<Int>
 
@@ -288,7 +339,7 @@ private struct CropStepper: View {
 }
 
 private struct CropOptionalStepper: View {
-    var title: String
+    var title: LocalizedStringKey
     @Binding var value: Int?
     var fallback: Int
     var range: ClosedRange<Int>

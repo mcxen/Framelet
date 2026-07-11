@@ -13,6 +13,8 @@ struct TimelineViewRepresentable: NSViewRepresentable {
     var keyframes: [Double]
     var thumbnails: [TimelineThumbnail]
     var waveform: Waveform
+    var emptyThumbnailText: String
+    var emptyWaveformText: String
     var onSeek: (Double) -> Void
     var onSelect: (Segment.ID?) -> Void
     var onResizeSegment: (Segment.ID, Double?, Double?) -> Void
@@ -29,6 +31,8 @@ struct TimelineViewRepresentable: NSViewRepresentable {
         view.keyframes = keyframes
         view.thumbnails = thumbnails
         view.waveform = waveform
+        view.emptyThumbnailText = emptyThumbnailText
+        view.emptyWaveformText = emptyWaveformText
         view.visibleStart = visibleStart
         view.visibleDuration = visibleDuration
         return view
@@ -46,6 +50,8 @@ struct TimelineViewRepresentable: NSViewRepresentable {
         nsView.keyframes = keyframes
         nsView.thumbnails = thumbnails
         nsView.waveform = waveform
+        nsView.emptyThumbnailText = emptyThumbnailText
+        nsView.emptyWaveformText = emptyWaveformText
         nsView.onSeek = onSeek
         nsView.onSelect = onSelect
         nsView.onResizeSegment = onResizeSegment
@@ -67,6 +73,8 @@ final class TimelineNSView: NSView {
     var keyframes: [Double] = []
     var thumbnails: [TimelineThumbnail] = []
     var waveform = Waveform(duration: 0, samples: [])
+    var emptyThumbnailText = "Thumbnails will appear here for playable video"
+    var emptyWaveformText = "Waveform will appear here when the media has audio"
     var onSeek: ((Double) -> Void)?
     var onSelect: ((Segment.ID?) -> Void)?
     var onResizeSegment: ((Segment.ID, Double?, Double?) -> Void)?
@@ -263,7 +271,7 @@ final class TimelineNSView: NSView {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
-            "Thumbnails will appear here for playable video".draw(
+            emptyThumbnailText.draw(
                 at: CGPoint(x: trackRect.minX + 10, y: trackRect.midY - 7),
                 withAttributes: attributes
             )
@@ -304,7 +312,7 @@ final class TimelineNSView: NSView {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
-            "Waveform will appear here when the media has audio".draw(
+            emptyWaveformText.draw(
                 at: CGPoint(x: trackRect.minX + 10, y: trackRect.midY - 7),
                 withAttributes: attributes
             )

@@ -38,6 +38,13 @@ if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
 fi
 cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
 
+# SwiftUI's implicit Text/Label localization resolves against the main app bundle.
+# SwiftPM keeps strings in a nested resource bundle, so expose its lproj folders here too.
+for LOCALIZATION in "$RESOURCE_BUNDLE"/*.lproj; do
+  [[ -d "$LOCALIZATION" ]] || continue
+  cp -R "$LOCALIZATION" "$APP_RESOURCES/"
+done
+
 if [[ -f "$ICON_SOURCE" ]]; then
   ICONSET="$(mktemp -d)/Framelet.iconset"
   mkdir -p "$ICONSET"

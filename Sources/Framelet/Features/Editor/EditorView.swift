@@ -67,6 +67,7 @@ struct EditorView: View {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(store.isExporting)
                 .quickHelp("Export enabled video segments")
             }
         }
@@ -132,7 +133,7 @@ private struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(store.statusMessage)
+            Text(LocalizedStringKey(store.statusMessage))
                 .lineLimit(1)
                 .truncationMode(.middle)
 
@@ -145,17 +146,17 @@ private struct StatusBar: View {
                         if store.isLoadingKeyframes {
                             StatusMetric("Scanning keyframes")
                         } else if !store.keyframeIndex.timestamps.isEmpty {
-                            StatusMetric("\(store.keyframeIndex.timestamps.count) keyframes")
+                            StatusMetric("\(store.keyframeIndex.timestamps.count)", unit: "keyframes")
                         }
                         if store.isLoadingThumbnails {
                             StatusMetric("Building thumbnails")
                         } else if !store.thumbnails.isEmpty {
-                            StatusMetric("\(store.thumbnails.count) thumbnails")
+                            StatusMetric("\(store.thumbnails.count)", unit: "thumbnails")
                         }
                         if store.isLoadingWaveform {
                             StatusMetric("Building waveform")
                         } else if !store.waveform.samples.isEmpty {
-                            StatusMetric("\(store.waveform.samples.count) waveform peaks")
+                            StatusMetric("\(store.waveform.samples.count)", unit: "waveform peaks")
                         }
                         if store.isBuildingProxy {
                             StatusMetric("Building proxy")
@@ -164,7 +165,7 @@ private struct StatusBar: View {
                         }
                     }
 
-                    StatusMetric("\(store.project.segments.count) segments")
+                    StatusMetric("\(store.project.segments.count)", unit: "segments")
                     StatusMetric(TimecodeFormatter.string(from: store.enabledSegmentsDuration))
                 }
             }
@@ -190,13 +191,25 @@ private struct StatusBar: View {
 
 private struct StatusMetric: View {
     var value: String
+    var unit: LocalizedStringKey?
 
     init(_ value: String) {
         self.value = value
+        unit = nil
+    }
+
+    init(_ value: String, unit: LocalizedStringKey) {
+        self.value = value
+        self.unit = unit
     }
 
     var body: some View {
-        Text(value)
+        HStack(spacing: 2) {
+            Text(LocalizedStringKey(value))
+            if let unit {
+                Text(unit)
+            }
+        }
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
     }

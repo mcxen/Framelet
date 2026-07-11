@@ -7,7 +7,7 @@ struct InspectorView: View {
         VStack(spacing: 0) {
             Picker("Inspector", selection: $store.selectedInspectorTab) {
                 ForEach(InspectorTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(LocalizedStringKey(tab.rawValue)).tag(tab)
                 }
             }
             .pickerStyle(.segmented)

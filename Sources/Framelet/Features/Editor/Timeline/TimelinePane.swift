@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TimelinePane: View {
     @Bindable var store: EditorStore
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +67,16 @@ struct TimelinePane: View {
                 keyframes: store.keyframeIndex.timestamps,
                 thumbnails: store.thumbnails,
                 waveform: store.waveform,
+                emptyThumbnailText: String(
+                    localized: "Thumbnails will appear here for playable video",
+                    bundle: .main,
+                    locale: locale
+                ),
+                emptyWaveformText: String(
+                    localized: "Waveform will appear here when the media has audio",
+                    bundle: .main,
+                    locale: locale
+                ),
                 onSeek: { store.seek(to: $0) },
                 onSelect: { store.selectedSegmentID = $0 },
                 onResizeSegment: { id, start, end in

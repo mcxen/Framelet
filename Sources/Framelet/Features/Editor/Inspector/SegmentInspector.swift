@@ -94,7 +94,7 @@ struct SegmentInspector: View {
                     )
                 ) {
                     ForEach(SegmentColor.allCases, id: \.self) { color in
-                        Text(color.rawValue.capitalized).tag(color)
+                        Text(LocalizedStringKey(color.rawValue.capitalized)).tag(color)
                     }
                 }
 

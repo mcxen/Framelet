@@ -127,7 +127,7 @@ enum SegmentCSV {
     }
 
     private static func parseTime(_ text: String) -> Double? {
-        if let seconds = Double(text) {
+        if let seconds = Double(text), seconds.isFinite {
             return seconds
         }
 
@@ -135,13 +135,14 @@ enum SegmentCSV {
         guard parts.count == 2 || parts.count == 3 else { return nil }
 
         let secondsText = parts.last ?? ""
-        guard let seconds = Double(secondsText) else { return nil }
+        guard let seconds = Double(secondsText), seconds.isFinite else { return nil }
         let minutesIndex = parts.count - 2
-        guard let minutes = Double(parts[minutesIndex]) else { return nil }
+        guard let minutes = Double(parts[minutesIndex]), minutes.isFinite else { return nil }
         let hours = parts.count == 3 ? Double(parts[0]) ?? .nan : 0
         guard hours.isFinite else { return nil }
 
-        return hours * 3600 + minutes * 60 + seconds
+        let result = hours * 3600 + minutes * 60 + seconds
+        return result.isFinite ? result : nil
     }
 }
 

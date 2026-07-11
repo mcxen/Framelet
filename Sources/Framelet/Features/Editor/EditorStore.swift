@@ -26,6 +26,8 @@ final class EditorStore {
     var isCropSelectionActive = false
     var selectedInspectorTab: InspectorTab = .segments
     var exportEvents: [String] = []
+    var isExporting = false
+    var exportProgress: Double = 0
     var keyframeIndex = KeyframeIndex([])
     var isLoadingKeyframes = false
     var thumbnails: [TimelineThumbnail] = []
@@ -45,6 +47,11 @@ final class EditorStore {
     private var previewStartTime: Double = 0
     private var cropSettingsBeforeEditing: CropSettings?
     private var modifiedAtBeforeCropEditing: Date?
+    private var mediaLoadTask: Task<Void, Never>?
+    private var keyframeTask: Task<Void, Never>?
+    private var thumbnailTask: Task<Void, Never>?
+    private var waveformTask: Task<Void, Never>?
+    private var mediaGeneration = UUID()
 
     init(project: EditingProject = .empty(), services: AppServices) {
         self.project = project
@@ -82,8 +89,13 @@ final class EditorStore {
     }
 
     func openMedia(_ url: URL) {
-        Task {
-            await loadMedia(url)
+        cancelMediaTasks()
+        let generation = UUID()
+        mediaGeneration = generation
+        mediaLoadTask = Task {
+            do { try await loadMedia(url, generation: generation) }
+            catch is CancellationError { }
+            catch { present(error) }
         }
     }
 
@@ -106,8 +118,14 @@ final class EditorStore {
                 defer { isLoading = false }
                 project = try services.projectStore.load(from: url)
                 projectURL = url
-                if let mediaURL {
-                    await loadMedia(mediaURL, replacingProject: false)
+                if let reference = project.mediaReference {
+                    cancelMediaTasks()
+                    let generation = UUID()
+                    mediaGeneration = generation
+                    let access = try services.fileAccess.resolve(reference)
+                    defer { access.stopAccessing() }
+                    try await loadMedia(access.url, replacingProject: false, generation: generation)
+                    project.mediaReference = try services.fileAccess.makeReference(for: access.url)
                 }
                 statusMessage = "Opened \(url.lastPathComponent)"
             } catch {
@@ -290,6 +308,10 @@ final class EditorStore {
     }
 
     func exportSeparateSegments(to outputDirectory: URL? = nil) {
+        guard !isExporting else {
+            statusMessage = "An export is already in progress"
+            return
+        }
         guard let mediaURL else {
             present(MediaError.missingMedia)
             return
@@ -344,15 +366,20 @@ final class EditorStore {
             metadataOverrides: project.exportPreset.metadataOverrides
         )
 
+        isExporting = true
+        exportProgress = 0
         Task {
             exportEvents = initialExportEvents
+            defer { isExporting = false }
             do {
                 for try await event in await services.ffmpegRunner.export(job) {
                     handleExportEvent(event)
                 }
+                exportProgress = 1
                 refreshCommandLog()
                 statusMessage = "Export finished"
             } catch {
+                exportProgress = 0
                 refreshCommandLog()
                 present(error)
             }
@@ -457,7 +484,7 @@ final class EditorStore {
         }
     }
 
-    private func loadMedia(_ url: URL, replacingProject: Bool = true) async {
+    private func loadMedia(_ url: URL, replacingProject: Bool = true, generation: UUID) async throws {
         do {
             isLoading = true
             defer { isLoading = false }
@@ -474,6 +501,8 @@ final class EditorStore {
             }
 
             let info = try await services.mediaProbe.probe(url)
+            try Task.checkCancellation()
+            guard mediaGeneration == generation else { return }
             mediaInfo = info
             mediaStartTime = info.timelineStartTime
             duration = info.displayDuration ?? assetDuration ?? 0
@@ -503,30 +532,46 @@ final class EditorStore {
             }
 
             statusMessage = "Loaded \(url.lastPathComponent) — set In and Out points to create a segment"
-            loadKeyframes(for: url, mediaInfo: info)
-            loadThumbnails(for: url, duration: duration, mediaInfo: info)
-            loadWaveform(for: url, duration: duration, mediaInfo: info)
+            loadKeyframes(for: url, mediaInfo: info, generation: generation)
+            loadThumbnails(for: url, duration: duration, mediaInfo: info, generation: generation)
+            loadWaveform(for: url, duration: duration, mediaInfo: info, generation: generation)
         } catch {
-            present(error)
+            if error is CancellationError { throw error }
+            throw error
         }
     }
 
-    private func loadKeyframes(for url: URL, mediaInfo: MediaInfo) {
+    private func cancelMediaTasks() {
+        mediaLoadTask?.cancel()
+        keyframeTask?.cancel()
+        thumbnailTask?.cancel()
+        waveformTask?.cancel()
+        mediaLoadTask = nil
+        keyframeTask = nil
+        thumbnailTask = nil
+        waveformTask = nil
+    }
+
+    private func loadKeyframes(for url: URL, mediaInfo: MediaInfo, generation: UUID) {
         guard mediaInfo.videoStreams.first != nil else {
             keyframeIndex = KeyframeIndex([])
             return
         }
 
-        Task {
+        keyframeTask?.cancel()
+        keyframeTask = Task {
             isLoadingKeyframes = true
             defer { isLoadingKeyframes = false }
 
             do {
-                keyframeIndex = try await services.keyframes.loadKeyframes(
+                let result = try await services.keyframes.loadKeyframes(
                     from: url,
                     streamIndex: 0,
                     startTime: mediaStartTime
                 )
+                try Task.checkCancellation()
+                guard mediaGeneration == generation else { return }
+                keyframeIndex = result
                 if keyframeIndex.timestamps.isEmpty {
                     statusMessage = "Loaded media; no keyframes reported"
                 } else {
@@ -539,23 +584,27 @@ final class EditorStore {
         }
     }
 
-    private func loadWaveform(for url: URL, duration: Double, mediaInfo: MediaInfo) {
+    private func loadWaveform(for url: URL, duration: Double, mediaInfo: MediaInfo, generation: UUID) {
         guard !mediaInfo.audioStreams.isEmpty else {
             waveform = Waveform(duration: duration, samples: [])
             return
         }
 
-        Task {
+        waveformTask?.cancel()
+        waveformTask = Task {
             isLoadingWaveform = true
             defer { isLoadingWaveform = false }
 
             do {
-                waveform = try await services.waveforms.loadWaveform(
+                let result = try await services.waveforms.loadWaveform(
                     from: url,
                     startTime: mediaStartTime,
                     duration: duration,
                     targetSampleCount: 900
                 )
+                try Task.checkCancellation()
+                guard mediaGeneration == generation else { return }
+                waveform = result
             } catch {
                 waveform = Waveform(duration: duration, samples: [])
                 exportEvents.append("Waveform generation failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
@@ -563,23 +612,27 @@ final class EditorStore {
         }
     }
 
-    private func loadThumbnails(for url: URL, duration: Double, mediaInfo: MediaInfo) {
+    private func loadThumbnails(for url: URL, duration: Double, mediaInfo: MediaInfo, generation: UUID) {
         guard !mediaInfo.videoStreams.isEmpty else {
             thumbnails = []
             return
         }
 
-        Task {
+        thumbnailTask?.cancel()
+        thumbnailTask = Task {
             isLoadingThumbnails = true
             defer { isLoadingThumbnails = false }
 
             do {
-                thumbnails = try await services.thumbnails.loadThumbnails(
+                let result = try await services.thumbnails.loadThumbnails(
                     from: url,
                     startTime: mediaStartTime,
                     duration: duration,
                     targetCount: 14
                 )
+                try Task.checkCancellation()
+                guard mediaGeneration == generation else { return }
+                thumbnails = result
             } catch {
                 thumbnails = []
                 exportEvents.append("Thumbnail generation failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
@@ -712,13 +765,14 @@ final class EditorStore {
     private func handleExportEvent(_ event: ExportEvent) {
         switch event {
         case .preparing:
+            exportProgress = 0
             exportEvents.append("Preparing export")
         case let .processingSegment(current, total):
             exportEvents.append("Exporting segment \(current) of \(total)")
         case .concatenating:
             exportEvents.append("Merging segments")
         case let .progress(fraction, _):
-            exportEvents.append("Progress \(Int(fraction * 100))%")
+            exportProgress = min(max(fraction, exportProgress), 1)
         case let .completed(url):
             exportEvents.append("Wrote \(url.lastPathComponent)")
         }

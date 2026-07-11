@@ -14,7 +14,9 @@ struct FrameletApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Framelet") {
+        // Framelet edits one project/player at a time. A single Window scene prevents global
+        // menu notifications from being observed by multiple EditorViews simultaneously.
+        Window("Framelet", id: "editor") {
             EditorView(store: store)
                 .frame(minWidth: 1050, minHeight: 680)
                 .preferredColorScheme(selectedTheme.colorScheme)

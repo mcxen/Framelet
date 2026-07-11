@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Security
 import Observation
 
 @MainActor
@@ -62,6 +63,7 @@ final class UpdateService {
             guard FileManager.default.fileExists(atPath: newApp.appending(path: "Contents/MacOS/Framelet").path) else {
                 throw UpdateError.invalidArchive
             }
+            try verifyDownloadedApplication(newApp)
 
             let installedApp = Bundle.main.bundleURL
             guard FileManager.default.isWritableFile(atPath: installedApp.deletingLastPathComponent().path) else {
@@ -78,6 +80,28 @@ final class UpdateService {
             NSApp.terminate(nil)
         } catch {
             state = .failed(message: error.localizedDescription)
+        }
+    }
+
+    private func verifyDownloadedApplication(_ appURL: URL) throws {
+        guard let expectedTeamID = Bundle.main.object(forInfoDictionaryKey: "FrameletUpdateTeamIdentifier") as? String,
+              !expectedTeamID.isEmpty else {
+            throw UpdateError.updateVerificationUnavailable
+        }
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(appURL as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode,
+              SecStaticCodeCheckValidity(staticCode, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), nil) == errSecSuccess else {
+            throw UpdateError.invalidSignature
+        }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let values = information as? [String: Any],
+              let teamID = values[kSecCodeInfoTeamIdentifier as String] as? String,
+              teamID == expectedTeamID,
+              let identifier = values[kSecCodeInfoIdentifier as String] as? String,
+              identifier == "dev.openspring.Framelet" else {
+            throw UpdateError.invalidSignature
         }
     }
 
@@ -109,6 +133,7 @@ private struct GitHubRelease: Decodable {
 
 private enum UpdateError: LocalizedError {
     case releaseUnavailable, assetUnavailable, downloadFailed, invalidArchive, helperUnavailable, installLocationNotWritable
+    case invalidSignature, updateVerificationUnavailable
     var errorDescription: String? {
         switch self {
         case .releaseUnavailable: "Unable to load the latest GitHub release."
@@ -117,6 +142,8 @@ private enum UpdateError: LocalizedError {
         case .invalidArchive: "The downloaded update is invalid."
         case .helperUnavailable: "The update helper is missing. Please reinstall Framelet."
         case .installLocationNotWritable: "Framelet cannot update this installation location. Move it to your Applications folder or update with Homebrew."
+        case .invalidSignature: "The update signature or publisher identity is invalid."
+        case .updateVerificationUnavailable: "This build cannot verify updates. Install an official signed release first."
         }
     }
 }

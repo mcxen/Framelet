@@ -11,6 +11,10 @@ brew install --cask framelet
 
 Upgrade a Homebrew installation with `brew upgrade --cask framelet`. Framelet can also check GitHub Releases from **Settings → About**; installations in a non-writable location should be upgraded through Homebrew instead.
 
+### Release signing
+
+Official releases require Developer ID signing and Apple notarization. Configure these GitHub Actions secrets before pushing a `v*` tag: `DEVELOPER_ID_CERTIFICATE_BASE64`, `DEVELOPER_ID_CERTIFICATE_PASSWORD`, `DEVELOPER_ID_APPLICATION`, `KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, and `APPLE_TEAM_ID`. The workflow deliberately fails when credentials are absent rather than publishing an ad-hoc-signed update. The updater verifies the downloaded app's code signature, bundle identifier, and Team ID before replacement; local development builds therefore cannot self-update.
+
 Framelet is a native macOS lossless trimming tool focused on opening media,
 marking precise ranges, organizing segments, saving projects, and exporting
 segments through FFmpeg stream copy.

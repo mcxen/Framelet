@@ -23,12 +23,33 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           swift --version
 
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${DEVELOPER_ID_CERTIFICATE_BASE64:?Missing signing certificate secret}"
+          : "${DEVELOPER_ID_CERTIFICATE_PASSWORD:?Missing certificate password secret}"
+          : "${KEYCHAIN_PASSWORD:?Missing keychain password secret}"
+          KEYCHAIN="$RUNNER_TEMP/framelet-signing.keychain-db"
+          echo "$DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer-id.p12" -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
       - name: Build release binary
         run: swift build -c release --arch arm64
 
       - name: Assemble application bundle
         env:
           VERSION: ${{ github.ref_name }}
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           APP="dist/Framelet.app"
@@ -37,6 +58,10 @@ jobs:
           cp "$BUILD_DIR/Framelet" "$APP/Contents/MacOS/Framelet"
           cp "$BUILD_DIR/FrameletUpdater" "$APP/Contents/MacOS/FrameletUpdater"
           cp -R "$BUILD_DIR/Framelet_Framelet.bundle" "$APP/Contents/Resources/"
+          for LOCALIZATION in "$BUILD_DIR/Framelet_Framelet.bundle"/*.lproj; do
+            [[ -d "$LOCALIZATION" ]] || continue
+            cp -R "$LOCALIZATION" "$APP/Contents/Resources/"
+          done
           chmod +x "$APP/Contents/MacOS/Framelet" "$APP/Contents/MacOS/FrameletUpdater"
 
           if [[ -f asset/FrameletIcon.png ]]; then
@@ -77,14 +102,37 @@ jobs:
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>$CLEAN_VERSION</string>
             <key>CFBundleVersion</key><string>${{ github.run_number }}</string>
+            <key>FrameletUpdateTeamIdentifier</key><string>$APPLE_TEAM_ID</string>
             <key>LSMinimumSystemVersion</key><string>14.0</string>
             <key>NSPrincipalClass</key><string>NSApplication</string>
           </dict></plist>
           PLIST
 
-          codesign --force --deep --sign - "$APP"
+          : "${DEVELOPER_ID_APPLICATION:?Missing Developer ID identity secret}"
+          : "${APPLE_TEAM_ID:?Missing Apple Team ID secret}"
+          codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID_APPLICATION" "$APP/Contents/MacOS/FrameletUpdater"
+          codesign --force --deep --options runtime --timestamp --sign "$DEVELOPER_ID_APPLICATION" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/Framelet-${VERSION}-macOS-arm64.zip"
+
+      - name: Notarize and staple application
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          : "${APPLE_ID:?Missing notarization Apple ID secret}"
+          : "${APPLE_APP_PASSWORD:?Missing app-specific password secret}"
+          xcrun notarytool submit "dist/Framelet-${VERSION}-macOS-arm64.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "dist/Framelet.app"
+          spctl --assess --type execute --verbose=2 "dist/Framelet.app"
+          rm "dist/Framelet-${VERSION}-macOS-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Framelet.app" "dist/Framelet-${VERSION}-macOS-arm64.zip"
           cp "dist/Framelet-${VERSION}-macOS-arm64.zip" "dist/Framelet-macOS-arm64.zip"
+          shasum -a 256 "dist/Framelet-${VERSION}-macOS-arm64.zip" > "dist/Framelet-${VERSION}-macOS-arm64.zip.sha256"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -93,3 +141,4 @@ jobs:
           files: |
             dist/Framelet-*-macOS-arm64.zip
             dist/Framelet-macOS-arm64.zip
+            dist/Framelet-*-macOS-arm64.zip.sha256

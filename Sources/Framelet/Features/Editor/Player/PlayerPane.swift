@@ -86,7 +86,13 @@ private struct PreviewBadge: View {
 
     var body: some View {
         if store.mediaInfo != nil {
-            Text(store.isUsingProxy ? "Proxy Preview" : "Original Preview")
+            Group {
+                if store.isUsingProxy {
+                    Text("Proxy Preview")
+                } else {
+                    Text("Original Preview")
+                }
+            }
                 .font(.caption)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

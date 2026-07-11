@@ -64,7 +64,7 @@ struct SettingsView: View {
             ProgressView(value: progress).frame(width: 90)
             Text("Installing update…")
         case let .failed(message):
-            Text(message).foregroundStyle(.red)
+            Text(LocalizedStringKey(message)).foregroundStyle(.red)
         }
     }
 }

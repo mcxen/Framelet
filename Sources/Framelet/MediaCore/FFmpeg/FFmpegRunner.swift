@@ -22,9 +22,14 @@ actor FFmpegRunner {
                     guard !enabled.isEmpty else {
                         throw MediaError.invalidSegmentRange
                     }
+                    let totalDuration = enabled.reduce(0) { $0 + $1.duration }
+                    guard totalDuration > 0 else {
+                        throw MediaError.invalidSegmentRange
+                    }
 
                     switch job.mode {
                     case .separateFiles:
+                        var completedDuration = 0.0
                         for (offset, segment) in enabled.enumerated() {
                             let outputURL = outputURL(for: segment, index: offset + 1, job: job)
                             try await exportSegment(
@@ -34,8 +39,12 @@ actor FFmpegRunner {
                                 outputURL: outputURL,
                                 ffmpeg: ffmpeg,
                                 job: job,
+                                completedDuration: completedDuration,
+                                totalDuration: totalDuration,
+                                progressScale: 1,
                                 continuation: continuation
                             )
+                            completedDuration += segment.duration
                             continuation.yield(.completed(outputURL))
                         }
 
@@ -52,6 +61,7 @@ actor FFmpegRunner {
                         }
 
                         var temporaryOutputs: [URL] = []
+                        var completedDuration = 0.0
                         for (offset, segment) in enabled.enumerated() {
                             let outputURL = temporaryDirectory
                                 .appendingPathComponent("segment-\(String(format: "%03d", offset + 1)).\(job.containerExtension)")
@@ -62,8 +72,12 @@ actor FFmpegRunner {
                                 outputURL: outputURL,
                                 ffmpeg: ffmpeg,
                                 job: job,
+                                completedDuration: completedDuration,
+                                totalDuration: totalDuration,
+                                progressScale: 0.95,
                                 continuation: continuation
                             )
+                            completedDuration += segment.duration
                             temporaryOutputs.append(outputURL)
                         }
 
@@ -87,6 +101,7 @@ actor FFmpegRunner {
                             ],
                             commandLog: commandLog
                         )
+                        continuation.yield(.progress(fraction: 1, speed: nil))
                         continuation.yield(.completed(finalURL))
                     }
 
@@ -105,6 +120,9 @@ actor FFmpegRunner {
         outputURL: URL,
         ffmpeg: URL,
         job: ExportJob,
+        completedDuration: Double,
+        totalDuration: Double,
+        progressScale: Double,
         continuation: AsyncThrowingStream<ExportEvent, Error>.Continuation
     ) async throws {
         guard segment.sourceEnd > segment.sourceStart else {
@@ -116,6 +134,8 @@ actor FFmpegRunner {
         var arguments = [
             "-hide_banner",
             "-nostdin",
+            "-progress", "pipe:1",
+            "-nostats",
             "-y"
         ]
 
@@ -150,8 +170,20 @@ actor FFmpegRunner {
         }
         arguments += ["-avoid_negative_ts", "make_zero", outputURL.path]
 
-        _ = try await ProcessRunner.run(executableURL: ffmpeg, arguments: arguments, commandLog: commandLog)
-        continuation.yield(.progress(fraction: Double(index) / Double(total), speed: nil))
+        let progressParser = FFmpegProgressParser()
+        _ = try await ProcessRunner.run(
+            executableURL: ffmpeg,
+            arguments: arguments,
+            commandLog: commandLog
+        ) { data in
+            for elapsed in progressParser.consume(data) {
+                let segmentProgress = min(max(elapsed, 0), segment.duration)
+                let fraction = progressScale * (completedDuration + segmentProgress) / totalDuration
+                continuation.yield(.progress(fraction: min(max(fraction, 0), progressScale), speed: nil))
+            }
+        }
+        let completedFraction = progressScale * (completedDuration + segment.duration) / totalDuration
+        continuation.yield(.progress(fraction: min(completedFraction, progressScale), speed: nil))
     }
 
     private func outputURL(for segment: Segment, index: Int, job: ExportJob) -> URL {
@@ -164,7 +196,7 @@ actor FFmpegRunner {
             timestamp: filenameTimestamp(job.exportTimestamp),
             extension: job.containerExtension
         )
-        return job.outputDirectory.appendingPathComponent(filename)
+        return availableOutputURL(job.outputDirectory.appendingPathComponent(filename))
     }
 
     private func mergedOutputURL(for job: ExportJob) -> URL {
@@ -172,9 +204,21 @@ actor FFmpegRunner {
             ? job.inputURL.deletingPathExtension().lastPathComponent
             : job.sourceBaseName
         let safeBase = sanitize(sourceBase)
-        return job.outputDirectory.appendingPathComponent(
+        return availableOutputURL(job.outputDirectory.appendingPathComponent(
             "\(safeBase)-\(filenameTimestamp(job.exportTimestamp))-merged.\(job.containerExtension)"
-        )
+        ))
+    }
+
+    private func availableOutputURL(_ proposed: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: proposed.path) else { return proposed }
+        let directory = proposed.deletingLastPathComponent()
+        let stem = proposed.deletingPathExtension().lastPathComponent
+        let pathExtension = proposed.pathExtension
+        for suffix in 2...9_999 {
+            let candidate = directory.appendingPathComponent("\(stem)-\(suffix).\(pathExtension)")
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return directory.appendingPathComponent("\(stem)-\(UUID().uuidString).\(pathExtension)")
     }
 
     private func resolvedName(
@@ -253,5 +297,26 @@ actor FFmpegRunner {
         }
 
         return arguments
+    }
+}
+
+final class FFmpegProgressParser: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = ""
+
+    func consume(_ data: Data) -> [Double] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        buffer += String(decoding: data, as: UTF8.self)
+        let lines = buffer.split(separator: "\n", omittingEmptySubsequences: false)
+        buffer = String(lines.last ?? "")
+
+        return lines.dropLast().compactMap { line in
+            guard line.hasPrefix("out_time_us="),
+                  let microseconds = Double(line.dropFirst("out_time_us=".count)),
+                  microseconds.isFinite else { return nil }
+            return microseconds / 1_000_000
+        }
     }
 }

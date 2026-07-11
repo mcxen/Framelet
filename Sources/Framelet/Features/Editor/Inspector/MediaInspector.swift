@@ -326,7 +326,7 @@ struct InfoSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.headline)
                 Spacer()
                 if let detail {
@@ -351,7 +351,7 @@ struct InfoRow: View {
 
     var body: some View {
         GridRow(alignment: .firstTextBaseline) {
-            Text(label)
+            Text(LocalizedStringKey(label))
                 .foregroundStyle(.secondary)
                 .frame(width: 68, alignment: .leading)
             Text(value)

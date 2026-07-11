@@ -5,6 +5,10 @@ struct ExportInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            ExportSummaryCard(store: store)
+
+            GroupBox("Output") {
+                VStack(alignment: .leading, spacing: 12) {
             Picker("Output", selection: $store.project.exportPreset.mode) {
                 Text("Separate files").tag(ExportMode.separateFiles)
                 Text("Merged file").tag(ExportMode.mergedFile)
@@ -27,13 +31,16 @@ struct ExportInspector: View {
             }
 
             TextField("Naming pattern", text: $store.project.exportPreset.namingPattern)
+                }
+                .padding(.vertical, 4)
+            }
 
-            Divider()
+            GroupBox("Picture") {
+                CropExportControls(store: store)
+                    .padding(.vertical, 4)
+            }
 
-            CropExportControls(store: store)
-
-            Divider()
-
+            VStack(spacing: 10) {
             Button {
                 store.quickExportBesideOriginal()
             } label: {
@@ -41,6 +48,8 @@ struct ExportInspector: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
 
             Button {
                 store.exportSeparateSegments()
@@ -48,6 +57,8 @@ struct ExportInspector: View {
                 Label("Export to Folder…", systemImage: "square.and.arrow.up")
             }
             .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
+            .frame(maxWidth: .infinity)
+            }
 
             if store.project.exportPreset.mode == .mergedFile {
                 Text("Merged export writes temporary segment files first, then concatenates them into one output file.")
@@ -74,6 +85,41 @@ struct ExportInspector: View {
         .onAppear {
             store.refreshCommandLog()
         }
+    }
+}
+
+private struct ExportSummaryCard: View {
+    @Bindable var store: EditorStore
+
+    private var enabledSegments: [Segment] { store.project.segments.filter(\.isEnabled) }
+    private var duration: Double { enabledSegments.reduce(0) { $0 + $1.duration } }
+    private var dimensions: String {
+        if let crop = store.cropPreviewRectangle, store.project.exportPreset.crop.isEnabled {
+            return "\(crop.width) × \(crop.height)"
+        }
+        guard let video = store.mediaInfo?.videoStreams.first,
+              let width = video.width, let height = video.height else { return "—" }
+        return "\(width) × \(height)"
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            summaryItem(icon: "scissors", value: "\(enabledSegments.count)", label: "Segments")
+            Divider().frame(height: 38)
+            summaryItem(icon: "clock", value: TimecodeFormatter.string(from: duration), label: "Duration")
+            Divider().frame(height: 38)
+            summaryItem(icon: "rectangle.inset.filled", value: dimensions, label: "Picture")
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func summaryItem(icon: String, value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Label(value, systemImage: icon).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -145,7 +191,15 @@ private struct CropExportControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Crop picture", isOn: $store.project.exportPreset.crop.isEnabled)
+            Toggle(
+                "Crop picture",
+                isOn: Binding(
+                    get: { store.project.exportPreset.crop.isEnabled },
+                    set: { isEnabled in
+                        store.setCropEnabled(isEnabled)
+                    }
+                )
+            )
 
             if store.project.exportPreset.crop.isEnabled {
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {

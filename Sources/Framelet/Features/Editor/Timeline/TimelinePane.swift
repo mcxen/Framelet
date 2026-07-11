@@ -78,7 +78,7 @@ struct TimelinePane: View {
                     store.panTimeline(by: fraction)
                 }
             )
-            .frame(minHeight: 260, idealHeight: 300, maxHeight: 380)
+            .frame(minHeight: 130)
         }
     }
 }

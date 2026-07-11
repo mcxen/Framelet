@@ -11,14 +11,22 @@ struct PlayerPane: View {
 
                 if let video = store.mediaInfo?.videoStreams.first,
                    let sourceWidth = video.width,
-                   let sourceHeight = video.height,
-                   let crop = store.cropPreviewRectangle {
+                   let sourceHeight = video.height {
                     CropOverlay(
                         sourceWidth: sourceWidth,
                         sourceHeight: sourceHeight,
-                        crop: crop,
+                        crop: store.project.exportPreset.crop.isEnabled ? store.cropPreviewRectangle : nil,
+                        allowsSelection: store.isCropSelectionActive,
                         onChange: store.setCropRectangle
                     )
+                }
+
+                if store.isCropSelectionActive, let crop = store.cropPreviewRectangle {
+                    VStack {
+                        CropEditingBar(store: store, crop: crop)
+                            .padding(.top, 12)
+                        Spacer()
+                    }
                 }
 
                 if store.mediaInfo == nil {
@@ -30,11 +38,23 @@ struct PlayerPane: View {
                     .foregroundStyle(.secondary)
                 }
 
-                if store.isLoading {
-                    ProgressView()
-                        .controlSize(.large)
+                if store.isLoading || store.isPreparingPreview {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Loading video preview…")
+                    }
                         .padding(24)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                if let previewError = store.previewErrorMessage {
+                    ContentUnavailableView(
+                        "Preview Unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(previewError)
+                    )
+                    .foregroundStyle(.secondary)
                 }
 
                 if store.isBuildingProxy {
@@ -76,44 +96,143 @@ private struct PreviewBadge: View {
     }
 }
 
+private struct CropEditingBar: View {
+    @Bindable var store: EditorStore
+    let crop: CropRectangle
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label("\(crop.width) x \(crop.height)", systemImage: "crop")
+                .font(.system(.callout, design: .monospaced, weight: .medium))
+                .lineLimit(1)
+
+            Divider()
+                .frame(height: 18)
+
+            Menu {
+                Button("Original") {
+                    store.setCropToFullFrame()
+                }
+                Button("1:1") {
+                    store.setCenteredCrop(aspectWidth: 1, aspectHeight: 1)
+                }
+                Button("16:9") {
+                    store.setCenteredCrop(aspectWidth: 16, aspectHeight: 9)
+                }
+                Button("9:16") {
+                    store.setCenteredCrop(aspectWidth: 9, aspectHeight: 16)
+                }
+            } label: {
+                Label("Aspect Ratio", systemImage: "aspectratio")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Button {
+                store.setCropToFullFrame()
+            } label: {
+                Label("Reset Crop", systemImage: "arrow.counterclockwise")
+            }
+            .labelStyle(.iconOnly)
+            .help("Reset Crop")
+
+            Divider()
+                .frame(height: 18)
+
+            Button("Cancel", role: .cancel) {
+                store.cancelCropSelection()
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Button("Done") {
+                store.finishCropSelection()
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.return, modifiers: [])
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+        .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
+        .fixedSize()
+    }
+}
+
 private struct CropOverlay: View {
     var sourceWidth: Int
     var sourceHeight: Int
-    var crop: CropRectangle
+    var crop: CropRectangle?
+    var allowsSelection: Bool
     var onChange: (CropRectangle) -> Void
 
     @State private var dragStart: CropRectangle?
+    @State private var selectionStart: CGPoint?
 
     var body: some View {
         GeometryReader { geometry in
             let videoFrame = fittedVideoFrame(in: geometry.size)
-            let cropFrame = cropFrame(in: videoFrame)
             let scale = cropScale(in: videoFrame)
 
-            Path { path in
-                path.addRect(CGRect(origin: .zero, size: geometry.size))
-                path.addRect(cropFrame)
+            if allowsSelection, crop == nil {
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .frame(width: videoFrame.width, height: videoFrame.height)
+                    .position(x: videoFrame.midX, y: videoFrame.midY)
+                    // Drag locations are local to this hit plane, so map against a zero-origin
+                    // video rectangle instead of the letterboxed position in the parent.
+                    .gesture(selectionGesture(
+                        videoFrame: CGRect(origin: .zero, size: videoFrame.size),
+                        scale: scale
+                    ))
             }
-            .fill(Color.black.opacity(0.42), style: FillStyle(eoFill: true))
 
-            Rectangle()
-                .path(in: cropFrame)
-                .stroke(.yellow, style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
-                .contentShape(Rectangle())
-                .gesture(cropGesture(handle: .move, scale: scale))
+            if let crop {
+                let cropFrame = cropFrame(for: crop, in: videoFrame)
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: geometry.size))
+                    path.addRect(cropFrame)
+                }
+                .fill(Color.black.opacity(0.42), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
 
-            Text("\(crop.width)x\(crop.height)")
-                .font(.system(.caption, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
-                .foregroundStyle(.yellow)
-                .position(x: cropFrame.midX, y: max(videoFrame.minY + 16, cropFrame.minY - 14))
+                CropGrid()
+                    .frame(width: cropFrame.width, height: cropFrame.height)
+                    .position(x: cropFrame.midX, y: cropFrame.midY)
+                    .allowsHitTesting(false)
+                    .opacity(allowsSelection ? 1 : 0)
 
-            ForEach(CropDragHandle.resizeHandles) { handle in
-                CropHandleView(handle: handle)
-                    .position(handle.point(in: cropFrame))
-                    .gesture(cropGesture(handle: handle, scale: scale))
+                Rectangle()
+                    .fill(.clear)
+                    .overlay {
+                        Rectangle()
+                            .stroke(.white, lineWidth: 3)
+                            .shadow(color: .black.opacity(0.7), radius: 1)
+                    }
+                    .frame(width: cropFrame.width, height: cropFrame.height)
+                    .position(x: cropFrame.midX, y: cropFrame.midY)
+                    .contentShape(Rectangle())
+                    .allowsHitTesting(allowsSelection)
+                    .gesture(cropGesture(handle: .move, scale: scale, crop: crop))
+
+                Text("\(crop.width) x \(crop.height)")
+                    .font(.system(.caption, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(.white)
+                    .position(x: cropFrame.midX, y: max(videoFrame.minY + 16, cropFrame.minY - 14))
+                    .allowsHitTesting(false)
+                    .opacity(allowsSelection ? 1 : 0)
+
+                if allowsSelection {
+                    ForEach(CropDragHandle.resizeHandles) { handle in
+                        CropHandleView(handle: handle)
+                            .position(handle.point(in: cropFrame))
+                            .gesture(cropGesture(handle: handle, scale: scale, crop: crop))
+                    }
+                }
             }
         }
     }
@@ -141,7 +260,7 @@ private struct CropOverlay: View {
         )
     }
 
-    private func cropFrame(in videoFrame: CGRect) -> CGRect {
+    private func cropFrame(for crop: CropRectangle, in videoFrame: CGRect) -> CGRect {
         let scaleX = videoFrame.width / CGFloat(sourceWidth)
         let scaleY = videoFrame.height / CGFloat(sourceHeight)
         return CGRect(
@@ -159,20 +278,37 @@ private struct CropOverlay: View {
         )
     }
 
-    private func cropGesture(handle: CropDragHandle, scale: CGSize) -> some Gesture {
+    private func selectionGesture(videoFrame: CGRect, scale: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                if selectionStart == nil { selectionStart = value.startLocation }
+                guard let start = selectionStart else { return }
+                let current = value.location
+                let left = max(videoFrame.minX, min(start.x, current.x))
+                let top = max(videoFrame.minY, min(start.y, current.y))
+                let right = min(videoFrame.maxX, max(start.x, current.x))
+                let bottom = min(videoFrame.maxY, max(start.y, current.y))
+                guard right - left >= 4, bottom - top >= 4 else { return }
+                onChange(CropRectangle(
+                    x: Int(((left - videoFrame.minX) / scale.width).rounded()).evenForVideo,
+                    y: Int(((top - videoFrame.minY) / scale.height).rounded()).evenForVideo,
+                    width: Int(((right - left) / scale.width).rounded()).evenForVideo,
+                    height: Int(((bottom - top) / scale.height).rounded()).evenForVideo
+                ))
+            }
+            .onEnded { _ in selectionStart = nil }
+    }
+
+    private func cropGesture(handle: CropDragHandle, scale: CGSize, crop: CropRectangle) -> some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
-                if dragStart == nil {
-                    dragStart = crop
-                }
+                if dragStart == nil { dragStart = crop }
                 guard let dragStart else { return }
                 let deltaX = Int((value.translation.width / max(scale.width, 0.0001)).rounded())
                 let deltaY = Int((value.translation.height / max(scale.height, 0.0001)).rounded())
                 onChange(adjustedCrop(from: dragStart, handle: handle, deltaX: deltaX, deltaY: deltaY))
             }
-            .onEnded { _ in
-                dragStart = nil
-            }
+            .onEnded { _ in dragStart = nil }
     }
 
     private func adjustedCrop(from start: CropRectangle, handle: CropDragHandle, deltaX: Int, deltaY: Int) -> CropRectangle {
@@ -226,18 +362,44 @@ private struct CropOverlay: View {
     }
 }
 
+private struct CropGrid: View {
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                let thirdWidth = geometry.size.width / 3
+                let thirdHeight = geometry.size.height / 3
+                for index in 1...2 {
+                    let x = thirdWidth * CGFloat(index)
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: geometry.size.height))
+
+                    let y = thirdHeight * CGFloat(index)
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                }
+            }
+            .stroke(.white.opacity(0.55), lineWidth: 0.75)
+        }
+    }
+}
+
 private struct CropHandleView: View {
     var handle: CropDragHandle
 
     var body: some View {
-        Rectangle()
-            .fill(.yellow)
-            .frame(width: handle.isCorner ? 11 : 18, height: handle.isCorner ? 11 : 7)
-            .overlay {
-                Rectangle()
-                    .stroke(.black.opacity(0.7), lineWidth: 1)
-            }
-            .contentShape(Rectangle())
+        ZStack {
+            Color.clear
+
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.white)
+                .frame(width: handle.isCorner ? 12 : 18, height: handle.isCorner ? 12 : 7)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(.black.opacity(0.65), lineWidth: 1)
+                }
+        }
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
     }
 }
 

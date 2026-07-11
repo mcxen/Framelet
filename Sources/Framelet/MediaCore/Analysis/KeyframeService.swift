@@ -1,7 +1,7 @@
 import Foundation
 
 protocol KeyframeService: Sendable {
-    func loadKeyframes(from url: URL, streamIndex: Int) async throws -> KeyframeIndex
+    func loadKeyframes(from url: URL, streamIndex: Int, startTime: Double) async throws -> KeyframeIndex
 }
 
 struct FFprobeKeyframeService: KeyframeService {
@@ -13,7 +13,7 @@ struct FFprobeKeyframeService: KeyframeService {
         self.commandLog = commandLog
     }
 
-    func loadKeyframes(from url: URL, streamIndex: Int) async throws -> KeyframeIndex {
+    func loadKeyframes(from url: URL, streamIndex: Int, startTime: Double) async throws -> KeyframeIndex {
         guard let executable = executableResolver.resolve("ffprobe") else {
             throw MediaError.ffprobeNotFound
         }
@@ -33,7 +33,10 @@ struct FFprobeKeyframeService: KeyframeService {
         )
 
         let response = try JSONDecoder().decode(FFprobeFramesResponse.self, from: output.stdout)
-        return KeyframeIndex(response.frames.compactMap(\.timestamp))
+        let safeStartTime = max(0, startTime)
+        return KeyframeIndex(response.frames.compactMap { frame in
+            frame.timestamp.map { $0 - safeStartTime }
+        })
     }
 }
 

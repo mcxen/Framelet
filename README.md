@@ -1,5 +1,16 @@
 # Framelet
 
+## Install
+
+Download the latest Apple Silicon build from [GitHub Releases](https://github.com/mcxen/Framelet/releases/latest), or install it with Homebrew:
+
+```bash
+brew tap mcxen/framelet https://github.com/mcxen/Framelet
+brew install --cask framelet
+```
+
+Upgrade a Homebrew installation with `brew upgrade --cask framelet`. Framelet can also check GitHub Releases from **Settings → About**; installations in a non-writable location should be upgraded through Homebrew instead.
+
 Framelet is a native macOS lossless trimming tool focused on opening media,
 marking precise ranges, organizing segments, saving projects, and exporting
 segments through FFmpeg stream copy.

@@ -11,9 +11,11 @@ struct ExportJob: Identifiable, Sendable {
     var namingPattern: String
     var baseName: String
     var sourceBaseName: String
+    var sourceStartOffset: Double = 0
     var exportTimestamp: Date = Date()
     var cropRectangle: CropRectangle?
     var videoEncode: VideoEncodeSettings
+    var metadataOverrides: [String: String]
 }
 
 enum ExportEvent: Sendable {
@@ -33,6 +35,7 @@ enum MediaError: LocalizedError, Sendable {
     case ffmpegNotFound
     case processFailed(executable: String, exitCode: Int32, summary: String)
     case exportNotImplemented(String)
+    case previewUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -52,6 +55,8 @@ enum MediaError: LocalizedError, Sendable {
             "\(executable) exited with code \(exitCode). \(summary)"
         case let .exportNotImplemented(message):
             message
+        case .previewUnavailable:
+            "The first video frame could not be loaded."
         }
     }
 }

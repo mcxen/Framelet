@@ -127,7 +127,14 @@ final class TimelineNSView: NSView {
                 CGRect(x: rect.maxX - edgeHitWidth / 2, y: rect.minY, width: edgeHitWidth, height: rect.height),
                 cursor: .resizeLeftRight
             )
-            addCursorRect(rect.insetBy(dx: edgeHitWidth, dy: 0), cursor: .openHand)
+
+            let moveWidth = rect.width - edgeHitWidth * 2
+            if moveWidth > 0 {
+                addCursorRect(
+                    CGRect(x: rect.minX + edgeHitWidth, y: rect.minY, width: moveWidth, height: rect.height),
+                    cursor: .openHand
+                )
+            }
         }
     }
 

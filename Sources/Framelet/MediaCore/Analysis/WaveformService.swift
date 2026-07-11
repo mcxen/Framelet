@@ -1,7 +1,7 @@
 import Foundation
 
 protocol WaveformService: Sendable {
-    func loadWaveform(from url: URL, duration: Double, targetSampleCount: Int) async throws -> Waveform
+    func loadWaveform(from url: URL, startTime: Double, duration: Double, targetSampleCount: Int) async throws -> Waveform
 }
 
 struct FFmpegWaveformService: WaveformService {
@@ -13,7 +13,7 @@ struct FFmpegWaveformService: WaveformService {
         self.commandLog = commandLog
     }
 
-    func loadWaveform(from url: URL, duration: Double, targetSampleCount: Int) async throws -> Waveform {
+    func loadWaveform(from url: URL, startTime: Double, duration: Double, targetSampleCount: Int) async throws -> Waveform {
         guard duration.isFinite, duration > 0 else {
             return Waveform(duration: 0, samples: [])
         }
@@ -27,7 +27,9 @@ struct FFmpegWaveformService: WaveformService {
                 "-hide_banner",
                 "-nostdin",
                 "-v", "error",
+                "-ss", String(format: "%.3f", max(0, startTime)),
                 "-i", url.path,
+                "-t", String(format: "%.3f", duration),
                 "-map", "0:a:0?",
                 "-ac", "1",
                 "-ar", "8000",

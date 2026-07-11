@@ -41,6 +41,7 @@ struct ExportPreset: Codable, Hashable, Sendable {
     var namingPattern: String = "{source}-{timestamp}-{index}"
     var crop: CropSettings = CropSettings()
     var videoEncode: VideoEncodeSettings = VideoEncodeSettings()
+    var metadataOverrides: [String: String] = [:]
 
     init() {}
 
@@ -51,6 +52,7 @@ struct ExportPreset: Codable, Hashable, Sendable {
         namingPattern = try container.decodeIfPresent(String.self, forKey: .namingPattern) ?? "{source}-{timestamp}-{index}"
         crop = try container.decodeIfPresent(CropSettings.self, forKey: .crop) ?? CropSettings()
         videoEncode = try container.decodeIfPresent(VideoEncodeSettings.self, forKey: .videoEncode) ?? VideoEncodeSettings()
+        metadataOverrides = try container.decodeIfPresent([String: String].self, forKey: .metadataOverrides) ?? [:]
     }
 }
 

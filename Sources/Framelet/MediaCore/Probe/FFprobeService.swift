@@ -43,26 +43,32 @@ private struct FFprobeResponse: Decodable {
         MediaInfo(
             url: url,
             formatName: format?.formatName,
+            startTime: format?.startTime?.doubleValue,
             duration: format?.duration?.doubleValue,
             size: format?.size?.int64Value,
             bitRate: format?.bitRate?.int64Value,
             streams: (streams ?? []).map(\.mediaStream),
-            chapters: (chapters ?? []).map(\.mediaChapter)
+            chapters: (chapters ?? []).map(\.mediaChapter),
+            metadata: format?.tags ?? [:]
         )
     }
 }
 
 private struct FFprobeFormat: Decodable {
     var formatName: String?
+    var startTime: LossyNumber?
     var duration: LossyNumber?
     var size: LossyNumber?
     var bitRate: LossyNumber?
+    var tags: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case formatName = "format_name"
+        case startTime = "start_time"
         case duration
         case size
         case bitRate = "bit_rate"
+        case tags
     }
 }
 
@@ -76,6 +82,7 @@ private struct FFprobeStream: Decodable {
     var height: Int?
     var rFrameRate: String?
     var avgFrameRate: String?
+    var startTime: LossyNumber?
     var timeBase: String?
     var sampleRate: LossyNumber?
     var channels: Int?
@@ -92,6 +99,7 @@ private struct FFprobeStream: Decodable {
         case height
         case rFrameRate = "r_frame_rate"
         case avgFrameRate = "avg_frame_rate"
+        case startTime = "start_time"
         case timeBase = "time_base"
         case sampleRate = "sample_rate"
         case channels
@@ -109,11 +117,13 @@ private struct FFprobeStream: Decodable {
             width: width,
             height: height,
             frameRate: Self.parseFrameRate(avgFrameRate) ?? Self.parseFrameRate(rFrameRate),
+            startTime: startTime?.doubleValue,
             timeBase: timeBase,
             sampleRate: sampleRate?.intValue,
             channels: channels,
             channelLayout: channelLayout,
-            language: tags?["language"]
+            language: tags?["language"],
+            metadata: tags ?? [:]
         )
     }
 

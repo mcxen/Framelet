@@ -12,6 +12,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+UPDATER_NAME="FrameletUpdater"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 ICON_SOURCE="${FRAMELET_ICON:-/Users/mcx/Downloads/FrameletIcon.png}"
@@ -20,12 +21,22 @@ ICON_FILE="Framelet.icns"
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+BUILD_DIR="$(swift build --show-bin-path)"
+BUILD_BINARY="$BUILD_DIR/$APP_NAME"
+UPDATER_BINARY="$BUILD_DIR/$UPDATER_NAME"
+RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
-chmod +x "$APP_BINARY"
+cp "$UPDATER_BINARY" "$APP_MACOS/$UPDATER_NAME"
+chmod +x "$APP_BINARY" "$APP_MACOS/$UPDATER_NAME"
+
+if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
+  echo "missing SwiftPM resource bundle: $RESOURCE_BUNDLE" >&2
+  exit 1
+fi
+cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
 
 if [[ -f "$ICON_SOURCE" ]]; then
   ICONSET="$(mktemp -d)/Framelet.iconset"
@@ -55,8 +66,19 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>zh-Hans</string>
+  </array>
   <key>CFBundleIconFile</key>
   <string>$ICON_FILE</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0-dev</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

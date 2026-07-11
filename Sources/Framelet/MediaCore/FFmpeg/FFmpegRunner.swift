@@ -80,6 +80,8 @@ actor FFmpegRunner {
                                 "-f", "concat",
                                 "-safe", "0",
                                 "-i", listURL.path,
+                                "-map_metadata", "0",
+                                "-map_metadata:s", "0:s",
                                 "-c", "copy",
                                 finalURL.path
                             ],
@@ -110,14 +112,24 @@ actor FFmpegRunner {
         }
 
         continuation.yield(.processingSegment(current: index, total: total))
+        let sourceStart = max(0, segment.sourceStart + job.sourceStartOffset)
         var arguments = [
             "-hide_banner",
             "-nostdin",
-            "-y",
-            "-ss", String(format: "%.3f", segment.sourceStart),
-            "-i", job.inputURL.path,
-            "-t", String(format: "%.3f", segment.duration)
+            "-y"
         ]
+
+        if job.cropRectangle == nil {
+            // Stream-copy exports seek to the preceding keyframe for speed and packet integrity.
+            arguments += ["-ss", String(format: "%.3f", sourceStart)]
+        }
+        arguments += ["-i", job.inputURL.path]
+        if job.cropRectangle != nil {
+            // A decoded crop can seek frame-accurately after opening the input. This avoids an
+            // audio/video timestamp gap that some players render as black frames at the start.
+            arguments += ["-ss", String(format: "%.3f", sourceStart)]
+        }
+        arguments += ["-t", String(format: "%.3f", segment.duration)]
 
         if job.selectedStreamIndexes.isEmpty {
             arguments += ["-map", "0"]
@@ -127,7 +139,15 @@ actor FFmpegRunner {
             }
         }
 
+        // Copy container and per-stream tags from the source, then apply explicit user edits.
+        arguments += ["-map_metadata", "0", "-map_metadata:s", "0:s"]
+        for (key, value) in job.metadataOverrides.sorted(by: { $0.key < $1.key }) {
+            arguments += ["-metadata", "\(key)=\(value)"]
+        }
         arguments += codecArguments(for: job)
+        if job.cropRectangle != nil {
+            arguments += ["-reset_timestamps", "1"]
+        }
         arguments += ["-avoid_negative_ts", "make_zero", outputURL.path]
 
         _ = try await ProcessRunner.run(executableURL: ffmpeg, arguments: arguments, commandLog: commandLog)

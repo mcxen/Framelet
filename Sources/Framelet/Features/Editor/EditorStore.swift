@@ -17,10 +17,13 @@ final class EditorStore {
     var selectedSegmentID: Segment.ID?
     var isPlaying = false
     var isLoading = false
+    var isPreparingPreview = false
+    var previewErrorMessage: String?
     var statusMessage = "Open a video or audio file to begin."
     var errorMessage: String?
     var projectURL: URL?
     var showInspector = true
+    var isCropSelectionActive = false
     var selectedInspectorTab: InspectorTab = .segments
     var exportEvents: [String] = []
     var keyframeIndex = KeyframeIndex([])
@@ -35,9 +38,13 @@ final class EditorStore {
     var commandLogEntries: [CommandLogEntry] = []
     var timelineVisibleStart: Double = 0
     var timelineVisibleDuration: Double = 1
+    var mediaStartTime: Double = 0
 
     private let services: AppServices
     private var timeObserver: Any?
+    private var previewStartTime: Double = 0
+    private var cropSettingsBeforeEditing: CropSettings?
+    private var modifiedAtBeforeCropEditing: Date?
 
     init(project: EditingProject = .empty(), services: AppServices) {
         self.project = project
@@ -57,6 +64,11 @@ final class EditorStore {
 
     var enabledSegmentsDuration: Double {
         project.segments.filter(\.isEnabled).reduce(0) { $0 + $1.duration }
+    }
+
+    var canCreateSegmentFromMarks: Bool {
+        guard let inPoint, let outPoint else { return false }
+        return inPoint.isFinite && outPoint.isFinite && outPoint > inPoint
     }
 
     var timelineZoom: Double {
@@ -167,7 +179,11 @@ final class EditorStore {
 
     func seek(to seconds: Double) {
         let clamped = max(0, min(seconds, duration))
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.seek(
+            to: CMTime(seconds: previewTime(forDisplayTime: clamped), preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
         currentTime = clamped
         keepTimeVisible(clamped)
     }
@@ -211,8 +227,10 @@ final class EditorStore {
     }
 
     func createSegmentFromMarks() {
-        let start = inPoint ?? currentTime
-        let end = outPoint ?? min(duration, currentTime + 5)
+        guard let start = inPoint, let end = outPoint else {
+            statusMessage = "Set both In and Out points before creating a segment"
+            return
+        }
         createSegment(start: start, end: end)
     }
 
@@ -320,8 +338,10 @@ final class EditorStore {
             namingPattern: project.exportPreset.namingPattern,
             baseName: project.name,
             sourceBaseName: mediaURL.deletingPathExtension().lastPathComponent,
+            sourceStartOffset: mediaStartTime,
             cropRectangle: cropRectangle,
-            videoEncode: project.exportPreset.videoEncode
+            videoEncode: project.exportPreset.videoEncode,
+            metadataOverrides: project.exportPreset.metadataOverrides
         )
 
         Task {
@@ -410,9 +430,12 @@ final class EditorStore {
 
     func useOriginalPreview() {
         guard let mediaURL else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: mediaURL))
-        isUsingProxy = false
-        statusMessage = "Using original media for preview"
+        let time = currentTime
+        Task {
+            await preparePreview(url: mediaURL, at: time)
+            isUsingProxy = false
+            statusMessage = "Using original media for preview"
+        }
     }
 
     func chooseAndOpenMedia() {
@@ -438,9 +461,10 @@ final class EditorStore {
         do {
             isLoading = true
             defer { isLoading = false }
+            mediaStartTime = 0
+            previewStartTime = 0
             let reference = try services.fileAccess.makeReference(for: url)
             let item = AVPlayerItem(url: url)
-            player.replaceCurrentItem(with: item)
             statusMessage = "Opening \(url.lastPathComponent)…"
 
             let assetDuration = try? await item.asset.load(.duration).seconds
@@ -451,10 +475,12 @@ final class EditorStore {
 
             let info = try await services.mediaProbe.probe(url)
             mediaInfo = info
-            duration = info.duration ?? assetDuration ?? 0
+            mediaStartTime = info.timelineStartTime
+            duration = info.displayDuration ?? assetDuration ?? 0
             timelineVisibleStart = 0
             timelineVisibleDuration = max(duration, 1)
             currentTime = 0
+            await preparePreview(item: item, at: 0)
             inPoint = nil
             outPoint = nil
             keyframeIndex = KeyframeIndex([])
@@ -496,7 +522,11 @@ final class EditorStore {
             defer { isLoadingKeyframes = false }
 
             do {
-                keyframeIndex = try await services.keyframes.loadKeyframes(from: url, streamIndex: 0)
+                keyframeIndex = try await services.keyframes.loadKeyframes(
+                    from: url,
+                    streamIndex: 0,
+                    startTime: mediaStartTime
+                )
                 if keyframeIndex.timestamps.isEmpty {
                     statusMessage = "Loaded media; no keyframes reported"
                 } else {
@@ -522,6 +552,7 @@ final class EditorStore {
             do {
                 waveform = try await services.waveforms.loadWaveform(
                     from: url,
+                    startTime: mediaStartTime,
                     duration: duration,
                     targetSampleCount: 900
                 )
@@ -545,6 +576,7 @@ final class EditorStore {
             do {
                 thumbnails = try await services.thumbnails.loadThumbnails(
                     from: url,
+                    startTime: mediaStartTime,
                     duration: duration,
                     targetCount: 14
                 )
@@ -556,9 +588,38 @@ final class EditorStore {
     }
 
     private func useProxyPreview(_ url: URL) {
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        isUsingProxy = true
-        seek(to: currentTime)
+        let time = currentTime
+        Task {
+            await preparePreview(url: url, at: time, previewStartTime: 0)
+            isUsingProxy = true
+        }
+    }
+
+    private func preparePreview(url: URL, at time: Double, previewStartTime: Double? = nil) async {
+        await preparePreview(item: AVPlayerItem(url: url), at: time, previewStartTime: previewStartTime)
+    }
+
+    private func preparePreview(item: AVPlayerItem, at time: Double, previewStartTime: Double? = nil) async {
+        isPreparingPreview = true
+        previewErrorMessage = nil
+        if let previewStartTime {
+            self.previewStartTime = max(0, previewStartTime)
+        } else {
+            self.previewStartTime = mediaStartTime
+        }
+        player.replaceCurrentItem(with: item)
+        do {
+            let isPlayable = try await item.asset.load(.isPlayable)
+            guard isPlayable else { throw MediaError.previewUnavailable }
+            let target = CMTime(seconds: previewTime(forDisplayTime: time), preferredTimescale: 600)
+            await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            // Preroll forces AVFoundation to decode a frame while playback remains paused.
+            _ = await player.preroll(atRate: 1)
+            player.pause()
+        } catch {
+            previewErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isPreparingPreview = false
     }
 
     private func keepTimeVisible(_ time: Double) {
@@ -577,6 +638,14 @@ final class EditorStore {
 
     private func clampedTimelineStart(_ start: Double, visibleDuration: Double) -> Double {
         max(0, min(start, max(0, duration - visibleDuration)))
+    }
+
+    private func displayTime(forSourceTime time: Double) -> Double {
+        max(0, time - previewStartTime)
+    }
+
+    private func previewTime(forDisplayTime time: Double) -> Double {
+        max(0, time + previewStartTime)
     }
 
     private func chooseProjectSaveURL() throws -> URL {
@@ -634,7 +703,7 @@ final class EditorStore {
         ) { [weak self] time in
             Task { @MainActor in
                 guard let self else { return }
-                self.currentTime = time.seconds.isFinite ? time.seconds : 0
+                self.currentTime = time.seconds.isFinite ? self.displayTime(forSourceTime: time.seconds) : 0
                 self.isPlaying = self.player.timeControlStatus == .playing
             }
         }
@@ -667,14 +736,87 @@ final class EditorStore {
         )
     }
 
+    var frameStepDuration: Double {
+        1 / max(mediaInfo?.videoStreams.first?.frameRate ?? 30, 1)
+    }
+
     func setCropToFullFrame() {
         guard let video = mediaInfo?.videoStreams.first,
               let width = video.width,
               let height = video.height else { return }
+        project.exportPreset.crop.isEnabled = true
         project.exportPreset.crop.x = 0
         project.exportPreset.crop.y = 0
-        project.exportPreset.crop.width = width
-        project.exportPreset.crop.height = height
+        project.exportPreset.crop.width = evenCropValue(width)
+        project.exportPreset.crop.height = evenCropValue(height)
+        project.modifiedAt = Date()
+    }
+
+    func toggleCropSelection() {
+        if isCropSelectionActive {
+            finishCropSelection()
+        } else {
+            beginCropSelection()
+        }
+    }
+
+    func beginCropSelection() {
+        guard let video = mediaInfo?.videoStreams.first,
+              let sourceWidth = video.width,
+              let sourceHeight = video.height else { return }
+
+        cropSettingsBeforeEditing = project.exportPreset.crop
+        modifiedAtBeforeCropEditing = project.modifiedAt
+        isCropSelectionActive = true
+
+        let currentCrop = project.exportPreset.crop
+        let currentWidth = currentCrop.width ?? sourceWidth
+        let currentHeight = currentCrop.height ?? sourceHeight
+        let hasCustomCrop = currentCrop.x != 0
+            || currentCrop.y != 0
+            || currentWidth != sourceWidth
+            || currentHeight != sourceHeight
+        project.exportPreset.crop.isEnabled = true
+
+        if hasCustomCrop, let rectangle = cropPreviewRectangle {
+            setCropRectangle(rectangle)
+        } else {
+            setCropRectangle(defaultCropRectangle(sourceWidth: sourceWidth, sourceHeight: sourceHeight))
+        }
+        statusMessage = "Editing crop"
+    }
+
+    func finishCropSelection() {
+        guard isCropSelectionActive else { return }
+        isCropSelectionActive = false
+        cropSettingsBeforeEditing = nil
+        modifiedAtBeforeCropEditing = nil
+        if let crop = cropPreviewRectangle {
+            statusMessage = "Crop set to \(crop.width) x \(crop.height)"
+        }
+    }
+
+    func cancelCropSelection() {
+        guard isCropSelectionActive else { return }
+        if let cropSettingsBeforeEditing {
+            project.exportPreset.crop = cropSettingsBeforeEditing
+        }
+        if let modifiedAtBeforeCropEditing {
+            project.modifiedAt = modifiedAtBeforeCropEditing
+        }
+        isCropSelectionActive = false
+        self.cropSettingsBeforeEditing = nil
+        self.modifiedAtBeforeCropEditing = nil
+        statusMessage = "Crop changes canceled"
+    }
+
+    func setCropEnabled(_ isEnabled: Bool) {
+        project.exportPreset.crop.isEnabled = isEnabled
+        if !isEnabled {
+            isCropSelectionActive = false
+            cropSettingsBeforeEditing = nil
+            modifiedAtBeforeCropEditing = nil
+        }
         project.modifiedAt = Date()
     }
 
@@ -704,11 +846,29 @@ final class EditorStore {
             cropHeight = Int(Double(sourceWidth) / targetRatio)
         }
 
-        project.exportPreset.crop.x = max(0, (sourceWidth - cropWidth) / 2)
-        project.exportPreset.crop.y = max(0, (sourceHeight - cropHeight) / 2)
-        project.exportPreset.crop.width = cropWidth
-        project.exportPreset.crop.height = cropHeight
-        project.modifiedAt = Date()
+        let evenWidth = max(2, evenCropValue(cropWidth))
+        let evenHeight = max(2, evenCropValue(cropHeight))
+        setCropRectangle(CropRectangle(
+            x: max(0, evenCropValue((sourceWidth - evenWidth) / 2)),
+            y: max(0, evenCropValue((sourceHeight - evenHeight) / 2)),
+            width: evenWidth,
+            height: evenHeight
+        ))
+    }
+
+    private func defaultCropRectangle(sourceWidth: Int, sourceHeight: Int) -> CropRectangle {
+        let width = max(2, evenCropValue(Int(Double(sourceWidth) * 0.9)))
+        let height = max(2, evenCropValue(Int(Double(sourceHeight) * 0.9)))
+        return CropRectangle(
+            x: max(0, evenCropValue((sourceWidth - width) / 2)),
+            y: max(0, evenCropValue((sourceHeight - height) / 2)),
+            width: width,
+            height: height
+        )
+    }
+
+    private func evenCropValue(_ value: Int) -> Int {
+        value - (value % 2)
     }
 
     func diagnostics(for segment: Segment) -> SegmentKeyframeDiagnostics? {
@@ -720,6 +880,71 @@ final class EditorStore {
             nextKeyframe: after,
             offsetFromPrevious: segment.sourceStart - before
         )
+    }
+
+    func seekSelectedSegmentBoundary(_ boundary: SegmentBoundary) {
+        guard let segment = selectedSegment else { return }
+        seek(to: boundary.time(in: segment))
+    }
+
+    func setSelectedSegmentBoundary(_ boundary: SegmentBoundary, to time: Double) {
+        guard let segment = selectedSegment else { return }
+
+        switch boundary {
+        case .start:
+            let newStart = max(0, min(time, segment.sourceEnd))
+            updateSelectedSegment { $0.sourceStart = newStart }
+        case .end:
+            let maxDuration = duration > 0 ? duration : time
+            let newEnd = min(maxDuration, max(time, segment.sourceStart))
+            updateSelectedSegment { $0.sourceEnd = newEnd }
+        }
+
+        if let updatedSegment = selectedSegment {
+            statusMessage = "\(updatedSegment.name) \(TimecodeFormatter.string(from: updatedSegment.sourceStart)) – \(TimecodeFormatter.string(from: updatedSegment.sourceEnd))"
+        }
+    }
+
+    func setSelectedSegmentBoundaryToCurrentTime(_ boundary: SegmentBoundary) {
+        setSelectedSegmentBoundary(boundary, to: currentTime)
+    }
+
+    func nudgeSelectedSegmentBoundary(_ boundary: SegmentBoundary, by seconds: Double) {
+        guard let segment = selectedSegment else { return }
+        setSelectedSegmentBoundary(boundary, to: boundary.time(in: segment) + seconds)
+        seekSelectedSegmentBoundary(boundary)
+    }
+
+    func moveSelectedSegmentBoundaryToAdjacentKeyframe(_ boundary: SegmentBoundary, direction: Int) {
+        guard direction != 0, let segment = selectedSegment else { return }
+
+        let currentBoundary = boundary.time(in: segment)
+        let epsilon = 0.001
+        let targetTime: Double?
+
+        if direction < 0 {
+            targetTime = keyframeIndex.nearestBefore(currentBoundary - epsilon)
+        } else {
+            targetTime = keyframeIndex.nearestAfter(currentBoundary + epsilon)
+        }
+
+        guard let targetTime else { return }
+        setSelectedSegmentBoundary(boundary, to: targetTime)
+        seekSelectedSegmentBoundary(boundary)
+    }
+}
+
+enum SegmentBoundary: String, Sendable {
+    case start
+    case end
+
+    func time(in segment: Segment) -> Double {
+        switch self {
+        case .start:
+            segment.sourceStart
+        case .end:
+            segment.sourceEnd
+        }
     }
 }
 

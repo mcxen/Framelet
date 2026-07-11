@@ -3,11 +3,11 @@ import AppKit
 import Foundation
 
 protocol ThumbnailService: Sendable {
-    func loadThumbnails(from url: URL, duration: Double, targetCount: Int) async throws -> [TimelineThumbnail]
+    func loadThumbnails(from url: URL, startTime: Double, duration: Double, targetCount: Int) async throws -> [TimelineThumbnail]
 }
 
 struct AVAssetThumbnailService: ThumbnailService {
-    func loadThumbnails(from url: URL, duration: Double, targetCount: Int) async throws -> [TimelineThumbnail] {
+    func loadThumbnails(from url: URL, startTime: Double, duration: Double, targetCount: Int) async throws -> [TimelineThumbnail] {
         guard duration.isFinite, duration > 0, targetCount > 0 else { return [] }
 
         let asset = AVURLAsset(url: url)
@@ -18,18 +18,22 @@ struct AVAssetThumbnailService: ThumbnailService {
         generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
 
         let count = max(1, min(targetCount, 18))
-        let step = duration / Double(count)
+        let safeStartTime = max(0, startTime)
+        let step = duration / Double(max(count - 1, 1))
         let times = (0..<count).map { index in
-            CMTime(seconds: min(duration, (Double(index) + 0.5) * step), preferredTimescale: 600)
+            let displayTime = count == 1 ? 0 : Double(index) * step
+            let clampedTime = min(max(0, duration - 0.001), displayTime)
+            return CMTime(seconds: safeStartTime + clampedTime, preferredTimescale: 600)
         }
 
         var thumbnails: [TimelineThumbnail] = []
         for time in times {
             do {
                 let result = try await generator.image(at: time)
+                let actualTime = result.actualTime.seconds.isFinite ? result.actualTime.seconds : time.seconds
                 thumbnails.append(
                     TimelineThumbnail(
-                        timestamp: result.actualTime.seconds.isFinite ? result.actualTime.seconds : time.seconds,
+                        timestamp: max(0, actualTime - safeStartTime),
                         image: NSImage(cgImage: result.image, size: .zero)
                     )
                 )

@@ -33,8 +33,11 @@ jobs:
           set -euo pipefail
           APP="dist/Framelet.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp "$(swift build -c release --arch arm64 --show-bin-path)/Framelet" "$APP/Contents/MacOS/Framelet"
-          chmod +x "$APP/Contents/MacOS/Framelet"
+          BUILD_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
+          cp "$BUILD_DIR/Framelet" "$APP/Contents/MacOS/Framelet"
+          cp "$BUILD_DIR/FrameletUpdater" "$APP/Contents/MacOS/FrameletUpdater"
+          cp -R "$BUILD_DIR/Framelet_Framelet.bundle" "$APP/Contents/Resources/"
+          chmod +x "$APP/Contents/MacOS/Framelet" "$APP/Contents/MacOS/FrameletUpdater"
 
           if [[ -f asset/FrameletIcon.png ]]; then
             ICON_SOURCE="asset/FrameletIcon.png"
@@ -68,6 +71,8 @@ jobs:
             <key>CFBundleExecutable</key><string>Framelet</string>
             <key>CFBundleIdentifier</key><string>dev.openspring.Framelet</string>
             <key>CFBundleName</key><string>Framelet</string>
+            <key>CFBundleDevelopmentRegion</key><string>en</string>
+            <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
             <key>CFBundleIconFile</key><string>Framelet.icns</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>$CLEAN_VERSION</string>
@@ -79,9 +84,12 @@ jobs:
 
           codesign --force --deep --sign - "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/Framelet-${VERSION}-macOS-arm64.zip"
+          cp "dist/Framelet-${VERSION}-macOS-arm64.zip" "dist/Framelet-macOS-arm64.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/Framelet-*-macOS-arm64.zip
+          files: |
+            dist/Framelet-*-macOS-arm64.zip
+            dist/Framelet-macOS-arm64.zip

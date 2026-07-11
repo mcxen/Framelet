@@ -6,15 +6,26 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                VStack(spacing: 0) {
+                VSplitView {
                     PlayerPane(store: store)
+                        .frame(minHeight: 280, idealHeight: 520)
+
                     TimelinePane(store: store)
+                        .frame(minHeight: 190, idealHeight: 260)
                 }
-                .frame(minWidth: 720)
+                .frame(minWidth: 640)
 
                 if store.showInspector {
                     InspectorView(store: store)
-                        .frame(minWidth: 300, idealWidth: 340, maxWidth: 380)
+                        .frame(minWidth: 300, idealWidth: 360, maxWidth: 420)
+                }
+            }
+            .overlay {
+                if store.mediaInfo == nil && !store.isLoading {
+                    EmptyProjectPrompt {
+                        store.chooseAndOpenMedia()
+                    }
+                    .padding(.bottom, 60)
                 }
             }
 
@@ -27,24 +38,28 @@ struct EditorView: View {
                 } label: {
                     Label("Open", systemImage: "folder")
                 }
+                .quickHelp("Open a media file")
 
                 Button {
                     store.saveProject(to: store.projectURL)
                 } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
+                .quickHelp("Save the current project")
 
                 Button {
                     store.saveProject(to: nil)
                 } label: {
                     Label("Save As", systemImage: "square.and.arrow.down.on.square")
                 }
+                .quickHelp("Save the project to a new file")
 
                 Button {
                     store.showInspector.toggle()
                 } label: {
                     Label("Inspector", systemImage: "sidebar.right")
                 }
+                .quickHelp("Show or hide Media, Segments, and Export settings")
 
                 Button {
                     store.exportSeparateSegments()
@@ -52,6 +67,7 @@ struct EditorView: View {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.borderedProminent)
+                .quickHelp("Export enabled video segments")
             }
         }
         .navigationTitle(store.project.name)
@@ -82,6 +98,35 @@ struct EditorView: View {
     }
 }
 
+private struct EmptyProjectPrompt: View {
+    var openMedia: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "film.stack")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 4) {
+                Text("Drop media here")
+                    .font(.title3.weight(.semibold))
+                Text("Open a video or audio file to start trimming.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                openMedia()
+            } label: {
+                Label("Open Media", systemImage: "folder")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(28)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 private struct StatusBar: View {
     let store: EditorStore
 
@@ -89,34 +134,42 @@ private struct StatusBar: View {
         HStack(spacing: 12) {
             Text(store.statusMessage)
                 .lineLimit(1)
+                .truncationMode(.middle)
 
             Spacer()
 
-            if let mediaInfo = store.mediaInfo {
-                Text(summary(for: mediaInfo))
-                if store.isLoadingKeyframes {
-                    Text("Scanning keyframes")
-                } else if !store.keyframeIndex.timestamps.isEmpty {
-                    Text("\(store.keyframeIndex.timestamps.count) keyframes")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if let mediaInfo = store.mediaInfo {
+                        StatusMetric(summary(for: mediaInfo))
+                        if store.isLoadingKeyframes {
+                            StatusMetric("Scanning keyframes")
+                        } else if !store.keyframeIndex.timestamps.isEmpty {
+                            StatusMetric("\(store.keyframeIndex.timestamps.count) keyframes")
+                        }
+                        if store.isLoadingThumbnails {
+                            StatusMetric("Building thumbnails")
+                        } else if !store.thumbnails.isEmpty {
+                            StatusMetric("\(store.thumbnails.count) thumbnails")
+                        }
+                        if store.isLoadingWaveform {
+                            StatusMetric("Building waveform")
+                        } else if !store.waveform.samples.isEmpty {
+                            StatusMetric("\(store.waveform.samples.count) waveform peaks")
+                        }
+                        if store.isBuildingProxy {
+                            StatusMetric("Building proxy")
+                        } else if store.isUsingProxy {
+                            StatusMetric("Proxy preview")
+                        }
+                    }
+
+                    StatusMetric("\(store.project.segments.count) segments")
+                    StatusMetric(TimecodeFormatter.string(from: store.enabledSegmentsDuration))
                 }
-                if store.isLoadingThumbnails {
-                    Text("Building thumbnails")
-                } else if !store.thumbnails.isEmpty {
-                    Text("\(store.thumbnails.count) thumbnails")
-                }
-                if store.isLoadingWaveform {
-                    Text("Building waveform")
-                } else if !store.waveform.samples.isEmpty {
-                    Text("\(store.waveform.samples.count) waveform peaks")
-                }
-                if store.isBuildingProxy {
-                    Text("Building proxy")
-                } else if store.isUsingProxy {
-                    Text("Proxy preview")
-                }
-                Text("\(store.project.segments.count) segments")
-                Text(TimecodeFormatter.string(from: store.enabledSegmentsDuration))
             }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 560, alignment: .trailing)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -132,5 +185,19 @@ private struct StatusBar: View {
             return "\(codec) · \(width)x\(height)"
         }
         return codec
+    }
+}
+
+private struct StatusMetric: View {
+    var value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    var body: some View {
+        Text(value)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }

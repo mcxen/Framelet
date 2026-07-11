@@ -36,15 +36,21 @@ struct SegmentInspector: View {
                     GridRow {
                         Text("Start")
                             .foregroundStyle(.secondary)
-                        TimeField(value: segment.sourceStart) { value in
-                            store.updateSelectedSegment { $0.sourceStart = max(0, min(value, $0.sourceEnd)) }
+                        VStack(alignment: .leading, spacing: 8) {
+                            TimeField(value: segment.sourceStart) { value in
+                                store.setSelectedSegmentBoundary(.start, to: value)
+                            }
+                            SegmentBoundaryControls(store: store, boundary: .start)
                         }
                     }
                     GridRow {
                         Text("End")
                             .foregroundStyle(.secondary)
-                        TimeField(value: segment.sourceEnd) { value in
-                            store.updateSelectedSegment { $0.sourceEnd = max($0.sourceStart, value) }
+                        VStack(alignment: .leading, spacing: 8) {
+                            TimeField(value: segment.sourceEnd) { value in
+                                store.setSelectedSegmentBoundary(.end, to: value)
+                            }
+                            SegmentBoundaryControls(store: store, boundary: .end)
                         }
                     }
                     GridRow {
@@ -92,20 +98,6 @@ struct SegmentInspector: View {
                     }
                 }
 
-                Divider()
-
-                Button {
-                    store.seek(to: segment.sourceStart)
-                } label: {
-                    Label("Go to Start", systemImage: "arrow.left.to.line")
-                }
-
-                Button {
-                    store.seek(to: segment.sourceEnd)
-                } label: {
-                    Label("Go to End", systemImage: "arrow.right.to.line")
-                }
-
                 Button(role: .destructive) {
                     store.deleteSelectedSegment()
                 } label: {
@@ -145,6 +137,76 @@ struct SegmentInspector: View {
             }
         }
         .padding(16)
+    }
+}
+
+private struct SegmentBoundaryControls: View {
+    @Bindable var store: EditorStore
+    var boundary: SegmentBoundary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    store.seekSelectedSegmentBoundary(boundary)
+                } label: {
+                    Label(boundary == .start ? "Go to Start" : "Go to End", systemImage: "playhead.arrowtriangle.right")
+                }
+                .help(boundary == .start ? "Move the playhead to this segment start" : "Move the playhead to this segment end")
+
+                Button {
+                    store.setSelectedSegmentBoundaryToCurrentTime(boundary)
+                } label: {
+                    Label("Use Playhead", systemImage: "scope")
+                }
+                .help(boundary == .start ? "Set segment start to the current playhead" : "Set segment end to the current playhead")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Text("Fine adjustment")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Button {
+                    store.nudgeSelectedSegmentBoundary(boundary, by: -store.frameStepDuration)
+                } label: {
+                    Label("Previous Frame", systemImage: "backward.frame")
+                }
+                .help("Move this boundary back one frame")
+
+                Button {
+                    store.nudgeSelectedSegmentBoundary(boundary, by: store.frameStepDuration)
+                } label: {
+                    Label("Next Frame", systemImage: "forward.frame")
+                }
+                .help("Move this boundary forward one frame")
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            HStack(spacing: 6) {
+                Button {
+                    store.moveSelectedSegmentBoundaryToAdjacentKeyframe(boundary, direction: -1)
+                } label: {
+                    Label("Previous Keyframe", systemImage: "backward.end")
+                }
+                .help("Move this boundary to the previous keyframe")
+                .disabled(store.keyframeIndex.timestamps.isEmpty)
+
+                Button {
+                    store.moveSelectedSegmentBoundaryToAdjacentKeyframe(boundary, direction: 1)
+                } label: {
+                    Label("Next Keyframe", systemImage: "forward.end")
+                }
+                .help("Move this boundary to the next keyframe")
+                .disabled(store.keyframeIndex.timestamps.isEmpty)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
     }
 }
 

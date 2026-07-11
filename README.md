@@ -4,8 +4,8 @@ Framelet is a native macOS lossless trimming tool focused on opening media,
 marking precise ranges, organizing segments, saving projects, and exporting
 segments through FFmpeg stream copy.
 
-> **License:** AGPL-3.0-only. Commercial use is not permitted by the project
-> owner without a separate commercial license. See [License](#license) below.
+> **License:** PolyForm Noncommercial 1.0.0. Commercial use requires a
+> separate written commercial license. See [License](#license) below.
 
 ## Interface
 
@@ -75,14 +75,13 @@ ad-hoc signed and is not notarized.
 
 ## License
 
-The source code is licensed under **GNU Affero General Public License v3.0 only
-(AGPL-3.0-only)**; see [`LICENSE`](LICENSE).
+Framelet is source-available under the **PolyForm Noncommercial License 1.0.0**;
+see [`LICENSE`](LICENSE).
 
-The project owner does **not grant permission for commercial use under the
-project's licensing policy**. Contact the copyright holder for a separate
-commercial license. Note that the standard AGPL itself is an open-source license
-that does not prohibit commercial use; therefore the no-commercial-use policy
-is an additional restriction and is not part of the standard AGPL grant.
+You may use, modify, and distribute Framelet only for purposes permitted by that
+license. Commercial use requires a separate written commercial license from the
+copyright holder. PolyForm Noncommercial is a source-available license, not an
+OSI-approved open-source license.
 
 ## Known Follow-ups
 

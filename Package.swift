@@ -12,10 +12,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "Framelet",
-            swiftSettings: [
-                .enableUpcomingFeature("StrictConcurrency")
-            ]
+            name: "Framelet"
         ),
         .testTarget(
             name: "FrameletTests",

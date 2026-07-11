@@ -176,6 +176,30 @@ final class EditorStore {
         seek(to: currentTime + seconds)
     }
 
+    func stepFrame(direction: Int) {
+        guard direction != 0 else { return }
+        player.pause()
+        isPlaying = false
+        if direction > 0 {
+            player.currentItem?.step(byCount: direction)
+        } else {
+            let frameDuration = 1 / max(mediaInfo?.videoStreams.first?.frameRate ?? 30, 1)
+            seek(to: currentTime + Double(direction) * frameDuration)
+        }
+    }
+
+    func jumpToPreviousKeyframe() {
+        if let timestamp = keyframeIndex.timestamps.last(where: { $0 < currentTime - 0.001 }) {
+            seek(to: timestamp)
+        }
+    }
+
+    func jumpToNextKeyframe() {
+        if let timestamp = keyframeIndex.timestamps.first(where: { $0 > currentTime + 0.001 }) {
+            seek(to: timestamp)
+        }
+    }
+
     func setInPoint() {
         inPoint = currentTime
         statusMessage = "In point set at \(TimecodeFormatter.string(from: currentTime))"
@@ -247,19 +271,25 @@ final class EditorStore {
         statusMessage = "Moved \(segment.name)"
     }
 
-    func exportSeparateSegments() {
+    func exportSeparateSegments(to outputDirectory: URL? = nil) {
         guard let mediaURL else {
             present(MediaError.missingMedia)
             return
         }
 
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Export"
-
-        guard panel.runModal() == .OK, let outputDirectory = panel.url else { return }
+        let resolvedOutputDirectory: URL
+        if let outputDirectory {
+            resolvedOutputDirectory = outputDirectory
+        } else {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.directoryURL = mediaURL.deletingLastPathComponent()
+            panel.prompt = "Export"
+            guard panel.runModal() == .OK, let selectedDirectory = panel.url else { return }
+            resolvedOutputDirectory = selectedDirectory
+        }
 
         let cropRectangle: CropRectangle?
         do {
@@ -282,7 +312,7 @@ final class EditorStore {
 
         let job = ExportJob(
             inputURL: mediaURL,
-            outputDirectory: outputDirectory,
+            outputDirectory: resolvedOutputDirectory,
             segments: project.segments,
             selectedStreamIndexes: project.selectedStreams,
             mode: project.exportPreset.mode,
@@ -307,6 +337,14 @@ final class EditorStore {
                 present(error)
             }
         }
+    }
+
+    func quickExportBesideOriginal() {
+        guard let mediaURL else {
+            present(MediaError.missingMedia)
+            return
+        }
+        exportSeparateSegments(to: mediaURL.deletingLastPathComponent())
     }
 
     func buildAndUseProxy() {
@@ -401,12 +439,18 @@ final class EditorStore {
             isLoading = true
             defer { isLoading = false }
             let reference = try services.fileAccess.makeReference(for: url)
-            let info = try await services.mediaProbe.probe(url)
             let item = AVPlayerItem(url: url)
             player.replaceCurrentItem(with: item)
+            statusMessage = "Opening \(url.lastPathComponent)…"
 
-            mediaInfo = info
             let assetDuration = try? await item.asset.load(.duration).seconds
+            if let assetDuration, assetDuration.isFinite {
+                duration = assetDuration
+                timelineVisibleDuration = max(assetDuration, 1)
+            }
+
+            let info = try await services.mediaProbe.probe(url)
+            mediaInfo = info
             duration = info.duration ?? assetDuration ?? 0
             timelineVisibleStart = 0
             timelineVisibleDuration = max(duration, 1)

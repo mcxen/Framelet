@@ -7,6 +7,14 @@ struct TransportBar: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 Button {
+                    store.jumpToPreviousKeyframe()
+                } label: {
+                    Label("Previous Keyframe", systemImage: "backward.end")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(store.keyframeIndex.timestamps.isEmpty)
+
+                Button {
                     store.step(by: -1)
                 } label: {
                     Label("Back 1s", systemImage: "gobackward.1")
@@ -14,7 +22,7 @@ struct TransportBar: View {
                 .labelStyle(.iconOnly)
 
                 Button {
-                    store.step(by: -1 / 30)
+                    store.stepFrame(direction: -1)
                 } label: {
                     Label("Previous Frame", systemImage: "backward.frame")
                 }
@@ -28,7 +36,7 @@ struct TransportBar: View {
                 .keyboardShortcut(.space, modifiers: [])
 
                 Button {
-                    store.step(by: 1 / 30)
+                    store.stepFrame(direction: 1)
                 } label: {
                     Label("Next Frame", systemImage: "forward.frame")
                 }
@@ -40,6 +48,14 @@ struct TransportBar: View {
                     Label("Forward 1s", systemImage: "goforward.1")
                 }
                 .labelStyle(.iconOnly)
+
+                Button {
+                    store.jumpToNextKeyframe()
+                } label: {
+                    Label("Next Keyframe", systemImage: "forward.end")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(store.keyframeIndex.timestamps.isEmpty)
 
                 Spacer()
 

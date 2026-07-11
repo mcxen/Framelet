@@ -35,11 +35,18 @@ struct ExportInspector: View {
             Divider()
 
             Button {
-                store.exportSeparateSegments()
+                store.quickExportBesideOriginal()
             } label: {
-                Label("Export", systemImage: "square.and.arrow.up")
+                Label("Quick Export Beside Original", systemImage: "bolt.fill")
             }
             .buttonStyle(.borderedProminent)
+            .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
+
+            Button {
+                store.exportSeparateSegments()
+            } label: {
+                Label("Export to Folder…", systemImage: "square.and.arrow.up")
+            }
             .disabled(store.project.segments.filter(\.isEnabled).isEmpty)
 
             if store.project.exportPreset.mode == .mergedFile {

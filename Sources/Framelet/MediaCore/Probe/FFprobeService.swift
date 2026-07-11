@@ -18,6 +18,8 @@ struct FFprobeService: MediaProbeService {
             executableURL: executable,
             arguments: [
                 "-v", "error",
+                "-probesize", "10M",
+                "-analyzeduration", "5000000",
                 "-show_format",
                 "-show_streams",
                 "-show_chapters",

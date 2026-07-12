@@ -200,3 +200,6 @@
 "Segment created — mark In and Out for the next segment." = "片段已创建，请标记下一段的入点和出点。";
 "That segment already exists." = "该片段已存在。";
 "Changing this boundary would duplicate an existing segment." = "调整此边界会与已有片段重复。";
+"Preview Segment" = "预览片段";
+"Pause Preview" = "暂停预览";
+"Segment preview progress" = "片段预览进度";

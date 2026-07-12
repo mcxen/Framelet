@@ -77,8 +77,8 @@ struct TimelinePane: View {
                 onResizeSegment: { id, start, end in
                     store.updateSegment(id: id, start: start, end: end)
                 },
-                onMoveSegment: { id, index in
-                    store.moveSegment(id: id, to: index)
+                onMoveSegment: { id, start, end in
+                    store.updateSegment(id: id, start: start, end: end)
                 },
                 onPanTimeline: { fraction in
                     store.panTimeline(by: fraction)

@@ -15,6 +15,7 @@ final class EditorStore {
     var inPoint: Double?
     var outPoint: Double?
     var selectedSegmentID: Segment.ID?
+    var previewingSegmentID: Segment.ID?
     var isPlaying = false
     var isLoading = false
     var isPreparingPreview = false
@@ -208,6 +209,7 @@ final class EditorStore {
     }
 
     func togglePlayback() {
+        previewingSegmentID = nil
         if isPlaying {
             player.pause()
             isPlaying = false
@@ -218,6 +220,34 @@ final class EditorStore {
     }
 
     func seek(to seconds: Double) {
+        previewingSegmentID = nil
+        seekPlayer(to: seconds)
+    }
+
+    func toggleSelectedSegmentPreview() {
+        guard let segment = selectedSegment else { return }
+
+        if previewingSegmentID == segment.id, isPlaying {
+            player.pause()
+            isPlaying = false
+            previewingSegmentID = nil
+            return
+        }
+
+        player.pause()
+        seekPlayer(to: segment.sourceStart)
+        previewingSegmentID = segment.id
+        player.play()
+        isPlaying = true
+        statusMessage = "Previewing \(segment.name)"
+    }
+
+    func segmentPreviewProgress(for segment: Segment) -> Double {
+        guard segment.duration > 0 else { return 0 }
+        return max(0, min(1, (currentTime - segment.sourceStart) / segment.duration))
+    }
+
+    private func seekPlayer(to seconds: Double) {
         let clamped = max(0, min(seconds, duration))
         player.seek(
             to: CMTime(seconds: previewTime(forDisplayTime: clamped), preferredTimescale: 600),
@@ -229,6 +259,7 @@ final class EditorStore {
     }
 
     func previewSeek(to seconds: Double) {
+        previewingSegmentID = nil
         let clamped = max(0, min(seconds, duration))
         currentTime = clamped
         keepTimeVisible(clamped)
@@ -256,6 +287,7 @@ final class EditorStore {
     func stepFrame(direction: Int) {
         guard direction != 0 else { return }
         player.pause()
+        previewingSegmentID = nil
         isPlaying = false
         if direction > 0 {
             player.currentItem?.step(byCount: direction)
@@ -329,6 +361,11 @@ final class EditorStore {
 
     func deleteSelectedSegment() {
         guard let selectedSegmentID else { return }
+        if previewingSegmentID == selectedSegmentID {
+            player.pause()
+            previewingSegmentID = nil
+            isPlaying = false
+        }
         project.segments.removeAll { $0.id == selectedSegmentID }
         self.selectedSegmentID = project.segments.first?.id
         project.modifiedAt = Date()
@@ -415,11 +452,32 @@ final class EditorStore {
             project.exportPreset.containerExtension = containerExtension
         }
 
+        let selectedStreams = (mediaInfo?.streams ?? []).filter {
+            project.selectedStreams.contains($0.index)
+        }
+        let mergedStreamIndexes = Set([
+            selectedStreams.first(where: { $0.kind == .video })?.index,
+            selectedStreams.first(where: { $0.kind == .audio })?.index
+        ].compactMap { $0 })
+        if project.exportPreset.mode == .mergedFile, mergedStreamIndexes.isEmpty {
+            present(MediaError.exportNotImplemented(
+                "Merged export requires at least one selected video or audio stream."
+            ))
+            return
+        }
+        if project.exportPreset.mode == .mergedFile,
+           mergedStreamIndexes != project.selectedStreams {
+            initialExportEvents.append(
+                "Merged export uses the first selected video and audio streams; camera data and additional tracks cannot be concatenated reliably."
+            )
+        }
+
         let job = ExportJob(
             inputURL: mediaURL,
             outputDirectory: resolvedOutputDirectory,
             segments: project.segments,
             selectedStreamIndexes: project.selectedStreams,
+            mergedStreamIndexes: mergedStreamIndexes,
             mode: project.exportPreset.mode,
             containerExtension: containerExtension,
             namingPattern: project.exportPreset.namingPattern,
@@ -566,6 +624,7 @@ final class EditorStore {
         do {
             isLoading = true
             defer { isLoading = false }
+            previewingSegmentID = nil
             mediaStartTime = 0
             previewStartTime = 0
             let reference = try services.fileAccess.makeReference(for: url)
@@ -838,8 +897,21 @@ final class EditorStore {
                 guard let self else { return }
                 self.currentTime = time.seconds.isFinite ? self.displayTime(forSourceTime: time.seconds) : 0
                 self.isPlaying = self.player.timeControlStatus == .playing
+                self.stopSegmentPreviewAtEndIfNeeded()
             }
         }
+    }
+
+    private func stopSegmentPreviewAtEndIfNeeded() {
+        guard let previewingSegmentID,
+              let segment = project.segments.first(where: { $0.id == previewingSegmentID }),
+              currentTime >= segment.sourceEnd else { return }
+
+        player.pause()
+        self.previewingSegmentID = nil
+        isPlaying = false
+        seekPlayer(to: segment.sourceEnd)
+        statusMessage = "Finished previewing \(segment.name)"
     }
 
     private func handleExportEvent(_ event: ExportEvent) {

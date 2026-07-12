@@ -73,6 +73,28 @@ struct SegmentInspector: View {
                     )
                 )
 
+                HStack(spacing: 10) {
+                    Button {
+                        store.toggleSelectedSegmentPreview()
+                    } label: {
+                        Label(
+                            store.previewingSegmentID == segment.id && store.isPlaying
+                                ? "Pause Preview"
+                                : "Preview Segment",
+                            systemImage: store.previewingSegmentID == segment.id && store.isPlaying
+                                ? "pause.fill"
+                                : "play.fill"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(store.mediaInfo == nil)
+
+                    ProgressView(value: store.segmentPreviewProgress(for: segment), total: 1)
+                        .progressViewStyle(.linear)
+                        .help("Segment preview progress")
+                }
+
                 if let diagnostics = store.selectedSegmentKeyframeDiagnostics {
                     InfoSection("Keyframe") {
                         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {

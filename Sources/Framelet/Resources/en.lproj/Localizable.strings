@@ -200,3 +200,6 @@
 "Segment created — mark In and Out for the next segment." = "Segment created — mark In and Out for the next segment.";
 "That segment already exists." = "That segment already exists.";
 "Changing this boundary would duplicate an existing segment." = "Changing this boundary would duplicate an existing segment.";
+"Preview Segment" = "Preview Segment";
+"Pause Preview" = "Pause Preview";
+"Segment preview progress" = "Segment preview progress";

@@ -49,6 +49,13 @@ actor FFmpegRunner {
                         }
 
                     case .mergedFile:
+                        guard !job.mergedStreamIndexes.isEmpty else {
+                            throw MediaError.exportNotImplemented(
+                                "Merged export requires at least one selected video or audio stream."
+                            )
+                        }
+                        var mergedJob = job
+                        mergedJob.selectedStreamIndexes = job.mergedStreamIndexes
                         let finalURL = mergedOutputURL(for: job)
                         let temporaryDirectory = FileManager.default.temporaryDirectory
                             .appendingPathComponent("Framelet-\(job.id.uuidString)", isDirectory: true)
@@ -71,7 +78,8 @@ actor FFmpegRunner {
                                 total: enabled.count,
                                 outputURL: outputURL,
                                 ffmpeg: ffmpeg,
-                                job: job,
+                                job: mergedJob,
+                                forceVideoEncode: true,
                                 completedDuration: completedDuration,
                                 totalDuration: totalDuration,
                                 progressScale: 0.95,
@@ -98,7 +106,6 @@ actor FFmpegRunner {
                                 "-safe", "0",
                                 "-i", listURL.path,
                                 "-map_metadata", "0",
-                                "-map_metadata:s", "0:s",
                                 "-c", "copy",
                                 finalURL.path
                             ],
@@ -131,6 +138,7 @@ actor FFmpegRunner {
         outputURL: URL,
         ffmpeg: URL,
         job: ExportJob,
+        forceVideoEncode: Bool = false,
         completedDuration: Double,
         totalDuration: Double,
         progressScale: Double,
@@ -142,44 +150,13 @@ actor FFmpegRunner {
 
         continuation.yield(.processingSegment(current: index, total: total))
         let sourceStart = max(0, segment.sourceStart + job.sourceStartOffset)
-        var arguments = [
-            "-hide_banner",
-            "-nostdin",
-            "-progress", "pipe:1",
-            "-nostats",
-            "-y"
-        ]
-
-        if job.cropRectangle == nil {
-            // Stream-copy exports seek to the preceding keyframe for speed and packet integrity.
-            arguments += ["-ss", String(format: "%.3f", sourceStart)]
-        }
-        arguments += ["-i", job.inputURL.path]
-        if job.cropRectangle != nil {
-            // A decoded crop can seek frame-accurately after opening the input. This avoids an
-            // audio/video timestamp gap that some players render as black frames at the start.
-            arguments += ["-ss", String(format: "%.3f", sourceStart)]
-        }
-        arguments += ["-t", String(format: "%.3f", segment.duration)]
-
-        if job.selectedStreamIndexes.isEmpty {
-            arguments += ["-map", "0"]
-        } else {
-            for streamIndex in job.selectedStreamIndexes.sorted() {
-                arguments += ["-map", "0:\(streamIndex)"]
-            }
-        }
-
-        // Copy container and per-stream tags from the source, then apply explicit user edits.
-        arguments += ["-map_metadata", "0", "-map_metadata:s", "0:s"]
-        for (key, value) in job.metadataOverrides.sorted(by: { $0.key < $1.key }) {
-            arguments += ["-metadata", "\(key)=\(value)"]
-        }
-        arguments += codecArguments(for: job)
-        if job.cropRectangle != nil {
-            arguments += ["-reset_timestamps", "1"]
-        }
-        arguments += ["-avoid_negative_ts", "make_zero", outputURL.path]
+        let arguments = FFmpegExportCommandBuilder.segmentArguments(
+            segment: segment,
+            sourceStart: sourceStart,
+            outputURL: outputURL,
+            job: job,
+            forceVideoEncode: forceVideoEncode
+        )
 
         let progressParser = FFmpegProgressParser()
         let progressNormalizer = FFmpegSegmentProgressNormalizer()
@@ -287,18 +264,78 @@ actor FFmpegRunner {
     private func escapeConcatPath(_ path: String) -> String {
         path.replacingOccurrences(of: "'", with: "'\\''")
     }
+}
 
-    private func codecArguments(for job: ExportJob) -> [String] {
-        guard let cropRectangle = job.cropRectangle else {
+struct FFmpegExportCommandBuilder {
+    static func segmentArguments(
+        segment: Segment,
+        sourceStart: Double,
+        outputURL: URL,
+        job: ExportJob,
+        forceVideoEncode: Bool = false
+    ) -> [String] {
+        var arguments = [
+            "-hide_banner",
+            "-nostdin",
+            "-progress", "pipe:1",
+            "-nostats",
+            "-y"
+        ]
+
+        if forceVideoEncode {
+            // Merged segments encode their primary video and audio streams, so FFmpeg's accurate
+            // input seek can use the preceding keyframe without retaining its preroll packets.
+            // This avoids decoding from the beginning of the source once per merged segment.
+            arguments += ["-ss", String(format: "%.3f", sourceStart)]
+            arguments += ["-i", job.inputURL.path]
+        } else {
+            arguments += ["-i", job.inputURL.path]
+            // Output-side seeking discards long-lived MOV metadata packets that begin before the
+            // cut. Input-side seeking with stream copy can retain those packets and anchor video
+            // at its source PTS, producing a long black lead-in and a wrong container duration.
+            arguments += ["-ss", String(format: "%.3f", sourceStart)]
+        }
+        arguments += ["-t", String(format: "%.3f", segment.duration)]
+
+        if job.selectedStreamIndexes.isEmpty {
+            arguments += ["-map", "0"]
+        } else {
+            for streamIndex in job.selectedStreamIndexes.sorted() {
+                arguments += ["-map", "0:\(streamIndex)"]
+            }
+        }
+
+        // Explicit global metadata mapping preserves container tags. Per-stream metadata is
+        // copied automatically; `-map_metadata:s 0:s` would copy stream 0's tags to every stream.
+        arguments += ["-map_metadata", "0"]
+        for (key, value) in job.metadataOverrides.sorted(by: { $0.key < $1.key }) {
+            arguments += ["-metadata", "\(key)=\(value)"]
+        }
+        arguments += codecArguments(for: job, forceVideoEncode: forceVideoEncode)
+        arguments += ["-reset_timestamps", "1"]
+        arguments += ["-avoid_negative_ts", "make_zero", outputURL.path]
+        return arguments
+    }
+
+    static func codecArguments(for job: ExportJob, forceVideoEncode: Bool = false) -> [String] {
+        guard job.cropRectangle != nil || forceVideoEncode else {
             return ["-c", "copy"]
         }
 
         var arguments = [
-            "-vf", cropRectangle.ffmpegFilter,
-            "-c:a", "copy",
             "-c:s", "copy",
             "-c:d", "copy"
         ]
+        if forceVideoEncode {
+            // Encoding audio removes codec preroll so every temporary merged file starts with
+            // the same A/V layout and near-zero timestamps.
+            arguments += ["-c:a", "aac", "-b:a", "192k"]
+        } else {
+            arguments += ["-c:a", "copy"]
+        }
+        if let cropRectangle = job.cropRectangle {
+            arguments = ["-vf", cropRectangle.ffmpegFilter] + arguments
+        }
 
         switch job.videoEncode.codec {
         case .h264VideoToolbox:

@@ -15,6 +15,21 @@ final class ExportPresetTests: XCTestCase {
     }
 
     @MainActor
+    func testSegmentPreviewProgressIsRelativeAndClamped() {
+        let store = EditorStore(services: AppServices())
+        let segment = Segment(name: "Preview", sourceStart: 10, sourceEnd: 30)
+
+        store.currentTime = 15
+        XCTAssertEqual(store.segmentPreviewProgress(for: segment), 0.25, accuracy: 0.000_001)
+
+        store.currentTime = 5
+        XCTAssertEqual(store.segmentPreviewProgress(for: segment), 0, accuracy: 0.000_001)
+
+        store.currentTime = 35
+        XCTAssertEqual(store.segmentPreviewProgress(for: segment), 1, accuracy: 0.000_001)
+    }
+
+    @MainActor
     func testCreatingSegmentRequiresValidInAndOutPoints() {
         let store = EditorStore(services: AppServices())
         store.duration = 60

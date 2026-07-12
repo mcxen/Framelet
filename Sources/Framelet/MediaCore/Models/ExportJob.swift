@@ -6,6 +6,7 @@ struct ExportJob: Identifiable, Sendable {
     var outputDirectory: URL
     var segments: [Segment]
     var selectedStreamIndexes: Set<Int>
+    var mergedStreamIndexes: Set<Int> = []
     var mode: ExportMode
     var containerExtension: String
     var namingPattern: String

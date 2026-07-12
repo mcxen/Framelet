@@ -18,7 +18,7 @@ struct TimelineViewRepresentable: NSViewRepresentable {
     var onSeek: (Double) -> Void
     var onSelect: (Segment.ID?) -> Void
     var onResizeSegment: (Segment.ID, Double?, Double?) -> Void
-    var onMoveSegment: (Segment.ID, Int) -> Void
+    var onMoveSegment: (Segment.ID, Double, Double) -> Void
     var onPanTimeline: (Double) -> Void
 
     func makeNSView(context: Context) -> TimelineNSView {
@@ -57,6 +57,7 @@ struct TimelineViewRepresentable: NSViewRepresentable {
         nsView.onResizeSegment = onResizeSegment
         nsView.onMoveSegment = onMoveSegment
         nsView.onPanTimeline = onPanTimeline
+        nsView.window?.invalidateCursorRects(for: nsView)
         nsView.needsDisplay = true
     }
 }
@@ -78,7 +79,7 @@ final class TimelineNSView: NSView {
     var onSeek: ((Double) -> Void)?
     var onSelect: ((Segment.ID?) -> Void)?
     var onResizeSegment: ((Segment.ID, Double?, Double?) -> Void)?
-    var onMoveSegment: ((Segment.ID, Int) -> Void)?
+    var onMoveSegment: ((Segment.ID, Double, Double) -> Void)?
     var onPanTimeline: ((Double) -> Void)?
     private var activeDrag: TimelineDrag?
     private let thumbnailY: CGFloat = 54
@@ -90,6 +91,12 @@ final class TimelineNSView: NSView {
     private let edgeHitWidth: CGFloat = 8
 
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.controlBackgroundColor.setFill()
@@ -105,6 +112,7 @@ final class TimelineNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         if let hit = hitTestTimeline(at: point) {
             onSelect?(hit.segment.id)
@@ -160,22 +168,21 @@ final class TimelineNSView: NSView {
             let proposedEnd = max(time(for: point.x), drag.segment.sourceStart + 0.05)
             onResizeSegment?(drag.segment.id, nil, proposedEnd)
         case .move:
+            let delta = Double((point.x - drag.mouseDownPoint.x) / max(1, bounds.width)) * safeVisibleDuration
+            let range = Self.movedRange(
+                start: drag.segment.sourceStart,
+                end: drag.segment.sourceEnd,
+                delta: delta,
+                duration: duration
+            )
+            onMoveSegment?(drag.segment.id, range.start, range.end)
             needsDisplay = true
         }
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer {
-            activeDrag = nil
-            needsDisplay = true
-        }
-
-        guard let drag = activeDrag else { return }
-        let point = convert(event.locationInWindow, from: nil)
-
-        if drag.kind == .move {
-            onMoveSegment?(drag.segment.id, insertionIndex(for: point.x, moving: drag.segment.id))
-        }
+        activeDrag = nil
+        needsDisplay = true
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -358,14 +365,32 @@ final class TimelineNSView: NSView {
     }
 
     private func drawMovePreview(for drag: TimelineDrag) {
-        let proposedIndex = insertionIndex(for: drag.latestPoint.x, moving: drag.segment.id)
-        let previewX = insertionX(for: proposedIndex, moving: drag.segment.id)
+        let delta = Double((drag.latestPoint.x - drag.mouseDownPoint.x) / max(1, bounds.width)) * safeVisibleDuration
+        let range = Self.movedRange(
+            start: drag.segment.sourceStart,
+            end: drag.segment.sourceEnd,
+            delta: delta,
+            duration: duration
+        )
+        let previewX = x(for: range.start)
         NSColor.controlAccentColor.setStroke()
         let path = NSBezierPath()
         path.move(to: CGPoint(x: previewX, y: segmentY - 10))
         path.line(to: CGPoint(x: previewX, y: segmentY + segmentHeight + 10))
         path.lineWidth = 3
         path.stroke()
+    }
+
+    static func movedRange(
+        start: Double,
+        end: Double,
+        delta: Double,
+        duration: Double
+    ) -> (start: Double, end: Double) {
+        let segmentDuration = max(0, end - start)
+        let maximumStart = max(0, duration - segmentDuration)
+        let movedStart = max(0, min(maximumStart, start + delta))
+        return (movedStart, min(duration, movedStart + segmentDuration))
     }
 
     private func drawMarks() {
@@ -430,35 +455,6 @@ final class TimelineNSView: NSView {
             width: max(4, x(for: segment.sourceEnd) - x(for: segment.sourceStart)),
             height: segmentHeight
         )
-    }
-
-    private func insertionIndex(for xPosition: CGFloat, moving movingID: Segment.ID) -> Int {
-        let remaining = segments.filter { $0.id != movingID }
-        guard !remaining.isEmpty else { return 0 }
-
-        for (index, segment) in remaining.enumerated() {
-            if xPosition < segmentRect(for: segment).midX {
-                return index
-            }
-        }
-
-        return remaining.count
-    }
-
-    private func insertionX(for insertionIndex: Int, moving movingID: Segment.ID) -> CGFloat {
-        let remaining = segments.filter { $0.id != movingID }
-        if remaining.isEmpty {
-            return bounds.midX
-        }
-        if insertionIndex <= 0 {
-            return segmentRect(for: remaining[0]).minX
-        }
-        if insertionIndex >= remaining.count {
-            return segmentRect(for: remaining[remaining.count - 1]).maxX
-        }
-        let left = segmentRect(for: remaining[insertionIndex - 1]).maxX
-        let right = segmentRect(for: remaining[insertionIndex]).minX
-        return (left + right) / 2
     }
 
     private func x(for time: Double) -> CGFloat {

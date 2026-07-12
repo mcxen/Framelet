@@ -5,22 +5,6 @@ struct SegmentInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Button {
-                    store.importSegmentsFromCSV()
-                } label: {
-                    Label("Import CSV", systemImage: "tray.and.arrow.down")
-                }
-
-                Button {
-                    store.exportSegmentsToCSV()
-                } label: {
-                    Label("Export CSV", systemImage: "square.and.arrow.up")
-                }
-                .disabled(store.project.segments.isEmpty)
-            }
-            .buttonStyle(.bordered)
-
             if !store.project.segments.isEmpty {
                 SegmentList(store: store)
             }
@@ -73,25 +57,37 @@ struct SegmentInspector: View {
                     )
                 )
 
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Button {
-                        store.toggleSelectedSegmentPreview()
+                        store.playSelectedSegmentFromBeginning()
                     } label: {
-                        Label(
-                            store.previewingSegmentID == segment.id && store.isPlaying
-                                ? "Pause Preview"
-                                : "Preview Segment",
-                            systemImage: store.previewingSegmentID == segment.id && store.isPlaying
-                                ? "pause.fill"
-                                : "play.fill"
-                        )
+                        Label("From Beginning", systemImage: "backward.end.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(store.mediaInfo == nil)
 
-                    ProgressView(value: store.segmentPreviewProgress(for: segment), total: 1)
-                        .progressViewStyle(.linear)
+                    Button {
+                        store.toggleSelectedSegmentPreviewPlayback()
+                    } label: {
+                        Label(
+                            store.isPlaying ? "Pause" : "Resume",
+                            systemImage: store.isPlaying ? "pause.fill" : "play.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(store.previewingSegmentID != segment.id)
+
+                    Slider(
+                        value: Binding(
+                            get: { store.segmentPreviewProgress(for: segment) },
+                            set: { store.seekSelectedSegmentPreview(to: $0) }
+                        ),
+                        in: 0...1
+                    )
+                        .disabled(store.mediaInfo == nil)
+                        .accessibilityLabel("Segment preview progress")
                         .help("Segment preview progress")
                 }
 

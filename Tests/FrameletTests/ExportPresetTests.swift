@@ -30,6 +30,45 @@ final class ExportPresetTests: XCTestCase {
     }
 
     @MainActor
+    func testSeekingSegmentPreviewUsesSegmentRelativeProgress() {
+        let segment = Segment(name: "Preview", sourceStart: 10, sourceEnd: 30)
+        var project = EditingProject.empty(name: "Preview")
+        project.segments = [segment]
+        let store = EditorStore(project: project, services: AppServices())
+        store.duration = 60
+        store.selectedSegmentID = segment.id
+
+        store.seekSelectedSegmentPreview(to: 0.25)
+        XCTAssertEqual(store.currentTime, 15, accuracy: 0.000_001)
+        XCTAssertEqual(store.previewingSegmentID, segment.id)
+
+        store.seekSelectedSegmentPreview(to: 2)
+        XCTAssertEqual(store.currentTime, 30, accuracy: 0.000_001)
+    }
+
+    @MainActor
+    func testSegmentPreviewCanResumeAfterPausing() {
+        let segment = Segment(name: "Preview", sourceStart: 10, sourceEnd: 30)
+        var project = EditingProject.empty(name: "Preview")
+        project.segments = [segment]
+        let store = EditorStore(project: project, services: AppServices())
+        store.duration = 60
+        store.selectedSegmentID = segment.id
+        store.previewingSegmentID = segment.id
+        store.currentTime = 18
+        store.isPlaying = true
+
+        store.toggleSelectedSegmentPreviewPlayback()
+        XCTAssertFalse(store.isPlaying)
+        XCTAssertEqual(store.currentTime, 18, accuracy: 0.000_001)
+        XCTAssertEqual(store.previewingSegmentID, segment.id)
+
+        store.toggleSelectedSegmentPreviewPlayback()
+        XCTAssertTrue(store.isPlaying)
+        XCTAssertEqual(store.currentTime, 18, accuracy: 0.000_001)
+    }
+
+    @MainActor
     func testCreatingSegmentRequiresValidInAndOutPoints() {
         let store = EditorStore(services: AppServices())
         store.duration = 60

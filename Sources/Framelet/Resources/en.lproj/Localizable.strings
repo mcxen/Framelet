@@ -66,6 +66,15 @@
 "Enabled" = "Enabled";
 "Segments" = "Segments";
 "Media" = "Media";
+"Diagnostics" = "Diagnostics";
+"Media Processing Diagnostics" = "Media Processing Diagnostics";
+"Commands recorded while probing media, scanning keyframes, building waveforms or proxies, and exporting." = "Commands recorded while probing media, scanning keyframes, building waveforms or proxies, and exporting.";
+"No Diagnostic Commands" = "No Diagnostic Commands";
+"Commands appear here after media processing or export." = "Commands appear here after media processing or export.";
+"Media Probe" = "Media Probe";
+"Waveform" = "Waveform";
+"FFmpeg" = "FFmpeg";
+"Override" = "Override";
 "Settings" = "Settings";
 "Name" = "Name";
 "Seconds" = "Seconds";
@@ -186,6 +195,7 @@
 "thumbnails" = "thumbnails";
 "waveform peaks" = "waveform peaks";
 "segments" = "segments";
+"Segment" = "Segment";
 "Drop media here" = "Drop media here";
 "Open a video or audio file to start trimming." = "Open a video or audio file to start trimming.";
 "Open Media" = "Open Media";
@@ -203,3 +213,6 @@
 "Preview Segment" = "Preview Segment";
 "Pause Preview" = "Pause Preview";
 "Segment preview progress" = "Segment preview progress";
+"From Beginning" = "From Beginning";
+"Paused segment preview" = "Paused segment preview";
+"Resume" = "Resume";

@@ -23,6 +23,8 @@ struct InspectorView: View {
                     MediaInspector(store: store)
                 case .export:
                     ExportInspector(store: store)
+                case .diagnostics:
+                    DiagnosticsInspector(store: store)
                 }
             }
         }

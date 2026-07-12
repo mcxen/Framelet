@@ -90,14 +90,8 @@ struct ExportInspector: View {
                 }
             }
 
-            Divider()
-
-            CommandLogView(store: store)
         }
         .padding(16)
-        .onAppear {
-            store.refreshCommandLog()
-        }
     }
 }
 
@@ -206,61 +200,6 @@ private struct ExportSummaryCard: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-private struct CommandLogView: View {
-    @Bindable var store: EditorStore
-
-    var body: some View {
-        InfoSection("Last FFmpeg Commands") {
-            if store.commandLogEntries.isEmpty {
-                Text("Commands will appear after media analysis, proxy generation, waveform building, or export.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    Button {
-                        store.refreshCommandLog()
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-
-                    Button(role: .destructive) {
-                        store.clearCommandLog()
-                    } label: {
-                        Label("Clear", systemImage: "trash")
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                ForEach(store.commandLogEntries) { entry in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(entry.date.formatted(date: .omitted, time: .standard))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                store.copyCommandToClipboard(entry.command)
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                            }
-                            .labelStyle(.iconOnly)
-                            .help("Copy command")
-                        }
-
-                        Text(entry.command)
-                            .font(.system(.caption, design: .monospaced))
-                            .lineLimit(4)
-                            .textSelection(.enabled)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-            }
-        }
     }
 }
 

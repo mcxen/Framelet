@@ -224,15 +224,8 @@ final class EditorStore {
         seekPlayer(to: seconds)
     }
 
-    func toggleSelectedSegmentPreview() {
+    func playSelectedSegmentFromBeginning() {
         guard let segment = selectedSegment else { return }
-
-        if previewingSegmentID == segment.id, isPlaying {
-            player.pause()
-            isPlaying = false
-            previewingSegmentID = nil
-            return
-        }
 
         player.pause()
         seekPlayer(to: segment.sourceStart)
@@ -240,6 +233,28 @@ final class EditorStore {
         player.play()
         isPlaying = true
         statusMessage = "Previewing \(segment.name)"
+    }
+
+    func toggleSelectedSegmentPreviewPlayback() {
+        guard previewingSegmentID == selectedSegmentID,
+              let segment = selectedSegment else { return }
+
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+            statusMessage = "Paused segment preview"
+        } else {
+            player.play()
+            isPlaying = true
+            statusMessage = "Previewing \(segment.name)"
+        }
+    }
+
+    func seekSelectedSegmentPreview(to progress: Double) {
+        guard let segment = selectedSegment else { return }
+        let clampedProgress = max(0, min(1, progress))
+        previewingSegmentID = segment.id
+        seekPlayer(to: segment.sourceStart + segment.duration * clampedProgress)
     }
 
     func segmentPreviewProgress(for segment: Segment) -> Double {
@@ -1201,6 +1216,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
     case segments = "Segments"
     case media = "Media"
     case export = "Export"
+    case diagnostics = "Diagnostics"
 
     var id: String { rawValue }
 }

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct AppCommands: Commands {
     var body: some Commands {
-        CommandMenu("Framelet") {
+        CommandGroup(replacing: .newItem) {
             Button("Open Media...") {
                 NotificationCenter.default.post(name: .frameletOpenMedia, object: nil)
             }
@@ -12,7 +12,9 @@ struct AppCommands: Commands {
                 NotificationCenter.default.post(name: .frameletOpenProject, object: nil)
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
+        }
 
+        CommandGroup(replacing: .saveItem) {
             Button("Save Project") {
                 NotificationCenter.default.post(name: .frameletSaveProject, object: nil)
             }
@@ -22,26 +24,9 @@ struct AppCommands: Commands {
                 NotificationCenter.default.post(name: .frameletSaveProjectAs, object: nil)
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+        }
 
-            Divider()
-
-            Button("Set In Point") {
-                NotificationCenter.default.post(name: .frameletSetInPoint, object: nil)
-            }
-            .keyboardShortcut("i", modifiers: [])
-
-            Button("Set Out Point") {
-                NotificationCenter.default.post(name: .frameletSetOutPoint, object: nil)
-            }
-            .keyboardShortcut("o", modifiers: [])
-
-            Button("Create Segment") {
-                NotificationCenter.default.post(name: .frameletCreateSegment, object: nil)
-            }
-            .keyboardShortcut("b", modifiers: .command)
-
-            Divider()
-
+        CommandGroup(replacing: .importExport) {
             Button("Import Segments CSV...") {
                 NotificationCenter.default.post(name: .frameletImportSegmentsCSV, object: nil)
             }
@@ -56,6 +41,23 @@ struct AppCommands: Commands {
                 NotificationCenter.default.post(name: .frameletExport, object: nil)
             }
             .keyboardShortcut("e", modifiers: .command)
+        }
+
+        CommandMenu("Segment") {
+            Button("Set In Point") {
+                NotificationCenter.default.post(name: .frameletSetInPoint, object: nil)
+            }
+            .keyboardShortcut("i", modifiers: [])
+
+            Button("Set Out Point") {
+                NotificationCenter.default.post(name: .frameletSetOutPoint, object: nil)
+            }
+            .keyboardShortcut("o", modifiers: [])
+
+            Button("Create Segment") {
+                NotificationCenter.default.post(name: .frameletCreateSegment, object: nil)
+            }
+            .keyboardShortcut("b", modifiers: .command)
         }
     }
 }

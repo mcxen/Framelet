@@ -33,42 +33,25 @@ struct EditorView: View {
             StatusBar(store: store)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    store.chooseAndOpenMedia()
-                } label: {
-                    Label("Open", systemImage: "folder")
-                }
-                .quickHelp("Open a media file")
-
-                Button {
-                    store.saveProject(to: store.projectURL)
-                } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
-                }
-                .quickHelp("Save the current project")
-
-                Button {
-                    store.saveProject(to: nil)
-                } label: {
-                    Label("Save As", systemImage: "square.and.arrow.down.on.square")
-                }
-                .quickHelp("Save the project to a new file")
-
+            ToolbarItem(placement: .secondaryAction) {
                 Button {
                     store.showInspector.toggle()
                 } label: {
                     Label("Inspector", systemImage: "sidebar.right")
                 }
+                .labelStyle(.titleAndIcon)
                 .quickHelp("Show or hide Media, Segments, and Export settings")
+            }
 
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     store.exportSeparateSegments()
                 } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
+                    Label("Export", systemImage: "film.stack")
                 }
+                .labelStyle(.titleAndIcon)
                 .buttonStyle(.borderedProminent)
-                .disabled(store.isExporting)
+                .disabled(store.mediaInfo == nil || store.isExporting)
                 .quickHelp("Export enabled video segments")
             }
         }

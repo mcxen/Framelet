@@ -9,16 +9,19 @@ struct MediaInspector: View {
             if let mediaInfo = store.mediaInfo {
                 MediaSummary(mediaInfo: mediaInfo)
 
-                InfoSection("File") {
+                GroupBox("File") {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                        InfoRow("Location", mediaInfo.url.deletingLastPathComponent().path)
+                        InfoRow(
+                            "Location",
+                            (mediaInfo.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+                        )
                         InfoRow("Format", displayFormat(mediaInfo.formatName))
                         InfoRow("Duration", TimecodeFormatter.string(from: mediaInfo.duration ?? 0))
                         if let size = mediaInfo.size {
                             InfoRow("Size", ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
                         }
                         if let bitRate = mediaInfo.bitRate {
-                            InfoRow("Bit rate", ByteCountFormatter.string(fromByteCount: bitRate, countStyle: .decimal) + "/s")
+                            InfoRow("Bit rate", formattedBitRate(bitRate))
                         }
                         if let creationDate = mediaInfo.creationDateText {
                             InfoRow("Created", creationDate)
@@ -30,6 +33,7 @@ struct MediaInspector: View {
                             InfoRow("GPS", location)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
 
                 InfoSection("Preview") {
@@ -133,18 +137,23 @@ struct MediaInspector: View {
         if format.lowercased().contains("matroska") { return "Matroska" }
         return format
     }
+
+    private func formattedBitRate(_ bitRate: Int64) -> String {
+        let megabitsPerSecond = Double(bitRate) / 1_000_000
+        return String(format: "%.1f Mb/s", megabitsPerSecond)
+    }
 }
 
 private struct MediaSummary: View {
     let mediaInfo: MediaInfo
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: "film")
                 .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(.tint)
+                .frame(width: 38, height: 38)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(mediaInfo.url.lastPathComponent)
@@ -159,6 +168,9 @@ private struct MediaSummary: View {
                     .lineLimit(1)
             }
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .help(mediaInfo.url.path)
     }
 
@@ -295,10 +307,23 @@ private struct MetadataEditorRow: View {
                         .foregroundStyle(.tint)
                 }
             }
-            HStack(spacing: 6) {
-                TextField(originalValue, text: $override, prompt: Text(originalValue))
-                    .textFieldStyle(.roundedBorder)
-                if !override.isEmpty {
+            if override.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(originalValue)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 8)
+                    Button("Override") {
+                        override = originalValue
+                    }
+                    .controlSize(.small)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    TextField("Override", text: $override)
+                        .textFieldStyle(.roundedBorder)
                     Button {
                         override = ""
                     } label: {
@@ -309,6 +334,7 @@ private struct MetadataEditorRow: View {
                 }
             }
         }
+        .padding(.vertical, 2)
     }
 }
 

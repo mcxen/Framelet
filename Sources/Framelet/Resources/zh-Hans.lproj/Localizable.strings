@@ -66,6 +66,15 @@
 "Enabled" = "启用";
 "Segments" = "片段";
 "Media" = "媒体";
+"Diagnostics" = "诊断";
+"Media Processing Diagnostics" = "媒体处理诊断";
+"Commands recorded while probing media, scanning keyframes, building waveforms or proxies, and exporting." = "这里记录媒体探测、关键帧扫描、波形或代理生成及导出时执行的命令。";
+"No Diagnostic Commands" = "暂无诊断命令";
+"Commands appear here after media processing or export." = "媒体处理或导出后，相关命令会显示在这里。";
+"Media Probe" = "媒体探测";
+"Waveform" = "波形";
+"FFmpeg" = "FFmpeg";
+"Override" = "覆盖";
 "Settings" = "设置";
 "Name" = "名称";
 "Seconds" = "秒";
@@ -186,6 +195,7 @@
 "thumbnails" = "张缩略图";
 "waveform peaks" = "个波形峰值";
 "segments" = "个片段";
+"Segment" = "片段";
 "Drop media here" = "将媒体拖到这里";
 "Open a video or audio file to start trimming." = "打开视频或音频文件以开始剪辑。";
 "Open Media" = "打开媒体";
@@ -203,3 +213,6 @@
 "Preview Segment" = "预览片段";
 "Pause Preview" = "暂停预览";
 "Segment preview progress" = "片段预览进度";
+"From Beginning" = "从头开始";
+"Paused segment preview" = "片段预览已暂停";
+"Resume" = "继续";

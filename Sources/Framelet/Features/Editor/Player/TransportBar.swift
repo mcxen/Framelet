@@ -155,14 +155,28 @@ private struct MarkingControls: View {
 
 private struct Scrubber: View {
     @Bindable var store: EditorStore
+    @State private var isScrubbing = false
+    @State private var scrubTime: Double = 0
 
     var body: some View {
         Slider(
             value: Binding(
-                get: { store.currentTime },
-                set: { store.seek(to: $0) }
+                get: { isScrubbing ? scrubTime : store.currentTime },
+                set: { value in
+                    scrubTime = value
+                    store.previewSeek(to: value)
+                }
             ),
-            in: 0...max(store.duration, 0.001)
+            in: 0...max(store.duration, 0.001),
+            onEditingChanged: { editing in
+                if editing {
+                    scrubTime = store.currentTime
+                    isScrubbing = true
+                } else {
+                    isScrubbing = false
+                    store.finishPreviewSeek(at: scrubTime)
+                }
+            }
         )
     }
 }

@@ -85,11 +85,14 @@ actor FFmpegRunner {
                         let listURL = temporaryDirectory.appendingPathComponent("segments.ffconcat")
                         try concatList(for: temporaryOutputs).write(to: listURL, atomically: true, encoding: .utf8)
 
+                        let progressParser = FFmpegProgressParser()
                         _ = try await ProcessRunner.run(
                             executableURL: ffmpeg,
                             arguments: [
                                 "-hide_banner",
                                 "-nostdin",
+                                "-progress", "pipe:1",
+                                "-nostats",
                                 "-y",
                                 "-f", "concat",
                                 "-safe", "0",
@@ -100,7 +103,15 @@ actor FFmpegRunner {
                                 finalURL.path
                             ],
                             commandLog: commandLog
-                        )
+                        ) { data in
+                            for update in progressParser.consume(data) {
+                                let mergeProgress = min(max(update.elapsed / totalDuration, 0), 1)
+                                continuation.yield(.progress(
+                                    fraction: 0.95 + mergeProgress * 0.05,
+                                    speed: update.speed
+                                ))
+                            }
+                        }
                         continuation.yield(.progress(fraction: 1, speed: nil))
                         continuation.yield(.completed(finalURL))
                     }
@@ -171,15 +182,23 @@ actor FFmpegRunner {
         arguments += ["-avoid_negative_ts", "make_zero", outputURL.path]
 
         let progressParser = FFmpegProgressParser()
+        let progressNormalizer = FFmpegSegmentProgressNormalizer()
         _ = try await ProcessRunner.run(
             executableURL: ffmpeg,
             arguments: arguments,
             commandLog: commandLog
         ) { data in
-            for elapsed in progressParser.consume(data) {
+            for update in progressParser.consume(data) {
+                let elapsed = progressNormalizer.relativeElapsed(
+                    update.elapsed,
+                    segmentDuration: segment.duration
+                )
                 let segmentProgress = min(max(elapsed, 0), segment.duration)
                 let fraction = progressScale * (completedDuration + segmentProgress) / totalDuration
-                continuation.yield(.progress(fraction: min(max(fraction, 0), progressScale), speed: nil))
+                continuation.yield(.progress(
+                    fraction: min(max(fraction, 0), progressScale),
+                    speed: update.speed
+                ))
             }
         }
         let completedFraction = progressScale * (completedDuration + segment.duration) / totalDuration
@@ -300,11 +319,17 @@ actor FFmpegRunner {
     }
 }
 
+struct FFmpegProgressUpdate: Equatable, Sendable {
+    var elapsed: Double
+    var speed: Double?
+}
+
 final class FFmpegProgressParser: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = ""
+    private var latestSpeed: Double?
 
-    func consume(_ data: Data) -> [Double] {
+    func consume(_ data: Data) -> [FFmpegProgressUpdate] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -313,10 +338,40 @@ final class FFmpegProgressParser: @unchecked Sendable {
         buffer = String(lines.last ?? "")
 
         return lines.dropLast().compactMap { line in
-            guard line.hasPrefix("out_time_us="),
-                  let microseconds = Double(line.dropFirst("out_time_us=".count)),
-                  microseconds.isFinite else { return nil }
-            return microseconds / 1_000_000
+            if line.hasPrefix("speed=") {
+                let value = line.dropFirst("speed=".count).trimmingCharacters(in: .whitespaces)
+                latestSpeed = Double(value.dropLast())
+                return nil
+            }
+
+            let prefixes: [(String, Double)] = [
+                ("out_time_us=", 1_000_000),
+                // Some FFmpeg builds label this as milliseconds even though its value
+                // is microseconds. Treat both output keys consistently.
+                ("out_time_ms=", 1_000_000)
+            ]
+            guard let (prefix, scale) = prefixes.first(where: { line.hasPrefix($0.0) }),
+                  let value = Double(line.dropFirst(prefix.count)),
+                  value.isFinite else { return nil }
+            return FFmpegProgressUpdate(elapsed: value / scale, speed: latestSpeed)
         }
+    }
+}
+
+private final class FFmpegSegmentProgressNormalizer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timestampOffset: Double?
+
+    func relativeElapsed(_ elapsed: Double, segmentDuration: Double) -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Stream-copy inputs sometimes report source timestamps rather than a
+        // segment-relative `out_time`. Detect that case once and normalize it so a
+        // clip beginning at (for example) 01:27:40 does not jump to 100%.
+        if timestampOffset == nil, elapsed > segmentDuration {
+            timestampOffset = elapsed
+        }
+        return max(0, elapsed - (timestampOffset ?? 0))
     }
 }

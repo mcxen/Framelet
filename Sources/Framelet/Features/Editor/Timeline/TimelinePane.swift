@@ -12,12 +12,7 @@ struct TimelinePane: View {
 
                 Spacer()
 
-                if let inPoint = store.inPoint {
-                    Text("In \(TimecodeFormatter.string(from: inPoint))")
-                }
-                if let outPoint = store.outPoint {
-                    Text("Out \(TimecodeFormatter.string(from: outPoint))")
-                }
+                SegmentMarkingStatus(store: store)
 
                 Divider()
                     .frame(height: 16)
@@ -91,5 +86,32 @@ struct TimelinePane: View {
             )
             .frame(minHeight: 130)
         }
+    }
+}
+
+private struct SegmentMarkingStatus: View {
+    let store: EditorStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let inPoint = store.inPoint {
+                Text("In \(TimecodeFormatter.string(from: inPoint))")
+                    .font(.system(.caption, design: .monospaced))
+            }
+            if let outPoint = store.outPoint {
+                Text("Out \(TimecodeFormatter.string(from: outPoint))")
+                    .font(.system(.caption, design: .monospaced))
+            }
+            if store.canCreateSegmentFromMarks {
+                Text(LocalizedStringKey(store.segmentMarkingStatus))
+                    .lineLimit(1)
+                    .foregroundStyle(.tint)
+            } else {
+                Text(LocalizedStringKey(store.segmentMarkingStatus))
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .help(store.segmentMarkingStatus)
     }
 }

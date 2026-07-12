@@ -192,3 +192,11 @@
 "Open a video or audio file to begin." = "Open a video or audio file to begin.";
 "Exporting" = "Exporting";
 "Export progress" = "Export progress";
+"Set In and Out to create a segment." = "Set In and Out to create a segment.";
+"In is set — move the playhead and set Out." = "In is set — move the playhead and set Out.";
+"Set In before Out." = "Set In before Out.";
+"Ready to create segment." = "Ready to create segment.";
+"Out must be after In." = "Out must be after In.";
+"Segment created — mark In and Out for the next segment." = "Segment created — mark In and Out for the next segment.";
+"That segment already exists." = "That segment already exists.";
+"Changing this boundary would duplicate an existing segment." = "Changing this boundary would duplicate an existing segment.";

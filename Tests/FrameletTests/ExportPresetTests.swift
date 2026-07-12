@@ -35,6 +35,76 @@ final class ExportPresetTests: XCTestCase {
     }
 
     @MainActor
+    func testCreatingMultipleSegmentsClearsMarksAndKeepsEachSegment() {
+        let store = EditorStore(services: AppServices())
+        store.duration = 90
+
+        store.inPoint = 5
+        store.outPoint = 12
+        XCTAssertTrue(store.createSegment(start: 5, end: 12))
+        XCTAssertNil(store.inPoint)
+        XCTAssertNil(store.outPoint)
+        XCTAssertFalse(store.canCreateSegmentFromMarks)
+
+        store.inPoint = 30
+        store.outPoint = 42
+        XCTAssertTrue(store.createSegmentFromMarks())
+
+        XCTAssertEqual(store.project.segments.map(\.name), ["Segment 1", "Segment 2"])
+        XCTAssertEqual(store.project.segments.map(\.sourceStart), [5, 30])
+        XCTAssertEqual(store.project.segments.map(\.sourceEnd), [12, 42])
+        XCTAssertEqual(store.selectedSegment?.name, "Segment 2")
+        XCTAssertNil(store.inPoint)
+        XCTAssertNil(store.outPoint)
+    }
+
+    @MainActor
+    func testSegmentsAllowOverlapButRejectFrameEquivalentDuplicates() {
+        let store = EditorStore(services: AppServices())
+        store.duration = 90
+
+        XCTAssertTrue(store.createSegment(start: 10, end: 20))
+        XCTAssertFalse(store.createSegment(start: 10.02, end: 20.02))
+        XCTAssertEqual(store.project.segments.count, 1)
+        XCTAssertTrue(store.createSegment(start: 15, end: 25))
+        XCTAssertEqual(store.project.segments.count, 2)
+    }
+
+    @MainActor
+    func testEditingSegmentCannotDuplicateAnotherAndNamesKeepIncreasing() {
+        let store = EditorStore(services: AppServices())
+        store.duration = 90
+        XCTAssertTrue(store.createSegment(start: 10, end: 20))
+        XCTAssertTrue(store.createSegment(start: 30, end: 40))
+        let secondID = try! XCTUnwrap(store.project.segments.last?.id)
+
+        store.updateSegment(id: secondID, start: 10, end: 20)
+        XCTAssertEqual(store.project.segments.last?.sourceStart, 30)
+        XCTAssertEqual(store.project.segments.last?.sourceEnd, 40)
+
+        store.selectedSegmentID = store.project.segments.first?.id
+        store.deleteSelectedSegment()
+        XCTAssertTrue(store.createSegment(start: 50, end: 60))
+        XCTAssertEqual(store.project.segments.last?.name, "Segment 3")
+    }
+
+    @MainActor
+    func testSettingNewInPointStartsFreshMarkingState() {
+        let store = EditorStore(services: AppServices())
+        store.duration = 60
+        store.createSegment(start: 20, end: 30)
+        XCTAssertNotNil(store.selectedSegmentID)
+
+        store.outPoint = 12
+        store.currentTime = 10
+        store.setInPoint()
+
+        XCTAssertNil(store.selectedSegmentID)
+        XCTAssertEqual(store.inPoint, 10)
+        XCTAssertEqual(store.outPoint, 12)
+    }
+
+    @MainActor
     func testTinyTimelineSegmentDoesNotCreateNegativeCursorRect() {
         let timeline = TimelineNSView(frame: CGRect(x: 0, y: 0, width: 320, height: 260))
         timeline.duration = 7_200

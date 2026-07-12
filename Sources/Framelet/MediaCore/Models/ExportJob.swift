@@ -26,6 +26,29 @@ enum ExportEvent: Sendable {
     case completed(URL)
 }
 
+enum ExportPhase: Equatable, Sendable {
+    case idle
+    case preparing
+    case exporting
+    case merging
+    case finished
+
+    var displayName: String {
+        switch self {
+        case .idle:
+            "Preparing export"
+        case .preparing:
+            "Preparing export"
+        case .exporting:
+            "Exporting"
+        case .merging:
+            "Merging files"
+        case .finished:
+            "Export complete"
+        }
+    }
+}
+
 enum MediaError: LocalizedError, Sendable {
     case missingMedia
     case invalidSegmentRange

@@ -28,6 +28,11 @@ final class EditorStore {
     var exportEvents: [String] = []
     var isExporting = false
     var exportProgress: Double = 0
+    var exportPhase: ExportPhase = .idle
+    var exportCurrentSegment = 0
+    var exportSegmentCount = 0
+    var exportSpeed: Double?
+    var exportEstimatedRemaining: TimeInterval?
     var keyframeIndex = KeyframeIndex([])
     var isLoadingKeyframes = false
     var thumbnails: [TimelineThumbnail] = []
@@ -52,6 +57,8 @@ final class EditorStore {
     private var thumbnailTask: Task<Void, Never>?
     private var waveformTask: Task<Void, Never>?
     private var mediaGeneration = UUID()
+    private var lastPreviewSeekDate = Date.distantPast
+    private var exportStartedAt: Date?
 
     init(project: EditingProject = .empty(), services: AppServices) {
         self.project = project
@@ -76,6 +83,21 @@ final class EditorStore {
     var canCreateSegmentFromMarks: Bool {
         guard let inPoint, let outPoint else { return false }
         return inPoint.isFinite && outPoint.isFinite && outPoint > inPoint
+    }
+
+    var segmentMarkingStatus: String {
+        switch (inPoint, outPoint) {
+        case (nil, nil):
+            "Set In and Out to create a segment."
+        case (.some, nil):
+            "In is set — move the playhead and set Out."
+        case (nil, .some):
+            "Set In before Out."
+        case let (.some(inPoint), .some(outPoint)) where outPoint > inPoint:
+            "Ready to create segment."
+        case (.some, .some):
+            "Out must be after In."
+        }
     }
 
     var timelineZoom: Double {
@@ -206,6 +228,27 @@ final class EditorStore {
         keepTimeVisible(clamped)
     }
 
+    func previewSeek(to seconds: Double) {
+        let clamped = max(0, min(seconds, duration))
+        currentTime = clamped
+        keepTimeVisible(clamped)
+
+        let now = Date()
+        guard now.timeIntervalSince(lastPreviewSeekDate) >= 0.08 else { return }
+        lastPreviewSeekDate = now
+
+        player.seek(
+            to: CMTime(seconds: previewTime(forDisplayTime: clamped), preferredTimescale: 600),
+            toleranceBefore: .positiveInfinity,
+            toleranceAfter: .positiveInfinity
+        )
+    }
+
+    func finishPreviewSeek(at seconds: Double) {
+        lastPreviewSeekDate = .distantPast
+        seek(to: seconds)
+    }
+
     func step(by seconds: Double) {
         seek(to: currentTime + seconds)
     }
@@ -236,6 +279,10 @@ final class EditorStore {
 
     func setInPoint() {
         inPoint = currentTime
+        selectedSegmentID = nil
+        if let outPoint, outPoint <= currentTime {
+            self.outPoint = nil
+        }
         statusMessage = "In point set at \(TimecodeFormatter.string(from: currentTime))"
     }
 
@@ -244,29 +291,40 @@ final class EditorStore {
         statusMessage = "Out point set at \(TimecodeFormatter.string(from: currentTime))"
     }
 
-    func createSegmentFromMarks() {
+    @discardableResult
+    func createSegmentFromMarks() -> Bool {
         guard let start = inPoint, let end = outPoint else {
             statusMessage = "Set both In and Out points before creating a segment"
-            return
+            return false
         }
-        createSegment(start: start, end: end)
+        return createSegment(start: start, end: end)
     }
 
-    func createSegment(start: Double, end: Double) {
+    @discardableResult
+    func createSegment(start: Double, end: Double) -> Bool {
         guard end > start else {
             present(MediaError.invalidSegmentRange)
-            return
+            return false
+        }
+
+        if let existing = matchingSegment(start: start, end: end) {
+            selectedSegmentID = existing.id
+            statusMessage = "That segment already exists."
+            return false
         }
 
         let segment = Segment(
-            name: "Segment \(project.segments.count + 1)",
+            name: nextSegmentName(),
             sourceStart: start,
             sourceEnd: end
         )
         project.segments.append(segment)
         selectedSegmentID = segment.id
+        inPoint = nil
+        outPoint = nil
         project.modifiedAt = Date()
-        statusMessage = "Created \(segment.name)"
+        statusMessage = "Segment created — mark In and Out for the next segment."
+        return true
     }
 
     func deleteSelectedSegment() {
@@ -289,6 +347,13 @@ final class EditorStore {
         let old = project.segments[index]
         let newStart = max(0, min(start ?? old.sourceStart, (end ?? old.sourceEnd) - minimumDuration))
         let newEnd = min(duration, max(end ?? old.sourceEnd, newStart + minimumDuration))
+
+        if matchingSegment(start: newStart, end: newEnd, excluding: id) != nil {
+            selectedSegmentID = id
+            statusMessage = "Changing this boundary would duplicate an existing segment."
+            return
+        }
+
         project.segments[index].sourceStart = newStart
         project.segments[index].sourceEnd = newEnd
         selectedSegmentID = id
@@ -368,18 +433,31 @@ final class EditorStore {
 
         isExporting = true
         exportProgress = 0
+        exportPhase = .preparing
+        exportCurrentSegment = 0
+        exportSegmentCount = job.segments.filter(\.isEnabled).count
+        exportSpeed = nil
+        exportEstimatedRemaining = nil
+        exportStartedAt = Date()
         Task {
             exportEvents = initialExportEvents
-            defer { isExporting = false }
+            defer {
+                isExporting = false
+                exportStartedAt = nil
+            }
             do {
                 for try await event in await services.ffmpegRunner.export(job) {
                     handleExportEvent(event)
                 }
                 exportProgress = 1
+                exportPhase = .finished
+                exportEstimatedRemaining = 0
                 refreshCommandLog()
                 statusMessage = "Export finished"
             } catch {
                 exportProgress = 0
+                exportPhase = .idle
+                exportEstimatedRemaining = nil
                 refreshCommandLog()
                 present(error)
             }
@@ -666,8 +744,10 @@ final class EditorStore {
             guard isPlayable else { throw MediaError.previewUnavailable }
             let target = CMTime(seconds: previewTime(forDisplayTime: time), preferredTimescale: 600)
             await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
-            // Preroll forces AVFoundation to decode a frame while playback remains paused.
-            _ = await player.preroll(atRate: 1)
+            // `seek` requests the frame needed by AVPlayerView. Do not await
+            // `preroll(atRate:)` here: for some otherwise playable media it never
+            // completes while the player is paused, leaving the loading overlay up
+            // even though AVPlayerView is already displaying the frame.
             player.pause()
         } catch {
             previewErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -766,16 +846,49 @@ final class EditorStore {
         switch event {
         case .preparing:
             exportProgress = 0
+            exportPhase = .preparing
             exportEvents.append("Preparing export")
         case let .processingSegment(current, total):
+            exportPhase = .exporting
+            exportCurrentSegment = current
+            exportSegmentCount = total
             exportEvents.append("Exporting segment \(current) of \(total)")
         case .concatenating:
+            exportPhase = .merging
+            exportEstimatedRemaining = nil
             exportEvents.append("Merging segments")
-        case let .progress(fraction, _):
+        case let .progress(fraction, speed):
             exportProgress = min(max(fraction, exportProgress), 1)
+            exportSpeed = speed
+            updateExportEstimate()
         case let .completed(url):
             exportEvents.append("Wrote \(url.lastPathComponent)")
         }
+    }
+
+    private func updateExportEstimate() {
+        guard exportPhase == .exporting,
+              exportProgress >= 0.02,
+              let exportStartedAt else { return }
+        let elapsed = Date().timeIntervalSince(exportStartedAt)
+        exportEstimatedRemaining = max(0, elapsed * (1 - exportProgress) / exportProgress)
+    }
+
+    private func matchingSegment(start: Double, end: Double, excluding id: Segment.ID? = nil) -> Segment? {
+        let tolerance = frameStepDuration
+        return project.segments.first {
+            $0.id != id
+                && abs($0.sourceStart - start) <= tolerance
+                && abs($0.sourceEnd - end) <= tolerance
+        }
+    }
+
+    private func nextSegmentName() -> String {
+        let highestIndex = project.segments.compactMap { segment -> Int? in
+            guard segment.name.hasPrefix("Segment ") else { return nil }
+            return Int(segment.name.dropFirst("Segment ".count))
+        }.max() ?? 0
+        return "Segment \(highestIndex + 1)"
     }
 
     private func present(_ error: Error) {
@@ -875,11 +988,20 @@ final class EditorStore {
     }
 
     func setCropRectangle(_ rectangle: CropRectangle) {
+        guard let video = mediaInfo?.videoStreams.first,
+              let sourceWidth = video.width,
+              let sourceHeight = video.height else { return }
+
+        let x = max(0, min(evenCropValue(rectangle.x), sourceWidth - 2))
+        let y = max(0, min(evenCropValue(rectangle.y), sourceHeight - 2))
+        let width = max(2, min(evenCropValue(rectangle.width), evenCropValue(sourceWidth - x)))
+        let height = max(2, min(evenCropValue(rectangle.height), evenCropValue(sourceHeight - y)))
+
         project.exportPreset.crop.isEnabled = true
-        project.exportPreset.crop.x = rectangle.x
-        project.exportPreset.crop.y = rectangle.y
-        project.exportPreset.crop.width = rectangle.width
-        project.exportPreset.crop.height = rectangle.height
+        project.exportPreset.crop.x = x
+        project.exportPreset.crop.y = y
+        project.exportPreset.crop.width = width
+        project.exportPreset.crop.height = height
         project.modifiedAt = Date()
     }
 
@@ -911,13 +1033,11 @@ final class EditorStore {
     }
 
     private func defaultCropRectangle(sourceWidth: Int, sourceHeight: Int) -> CropRectangle {
-        let width = max(2, evenCropValue(Int(Double(sourceWidth) * 0.9)))
-        let height = max(2, evenCropValue(Int(Double(sourceHeight) * 0.9)))
         return CropRectangle(
-            x: max(0, evenCropValue((sourceWidth - width) / 2)),
-            y: max(0, evenCropValue((sourceHeight - height) / 2)),
-            width: width,
-            height: height
+            x: 0,
+            y: 0,
+            width: evenCropValue(sourceWidth),
+            height: evenCropValue(sourceHeight)
         )
     }
 
@@ -947,15 +1067,11 @@ final class EditorStore {
         switch boundary {
         case .start:
             let newStart = max(0, min(time, segment.sourceEnd))
-            updateSelectedSegment { $0.sourceStart = newStart }
+            updateSegment(id: segment.id, start: newStart)
         case .end:
             let maxDuration = duration > 0 ? duration : time
             let newEnd = min(maxDuration, max(time, segment.sourceStart))
-            updateSelectedSegment { $0.sourceEnd = newEnd }
-        }
-
-        if let updatedSegment = selectedSegment {
-            statusMessage = "\(updatedSegment.name) \(TimecodeFormatter.string(from: updatedSegment.sourceStart)) – \(TimecodeFormatter.string(from: updatedSegment.sourceEnd))"
+            updateSegment(id: segment.id, end: newEnd)
         }
     }
 

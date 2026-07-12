@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct EditorView: View {
@@ -89,12 +90,86 @@ struct EditorView: View {
         .onReceive(NotificationCenter.default.publisher(for: .frameletImportSegmentsCSV)) { _ in store.importSegmentsFromCSV() }
         .onReceive(NotificationCenter.default.publisher(for: .frameletExportSegmentsCSV)) { _ in store.exportSegmentsToCSV() }
         .onReceive(NotificationCenter.default.publisher(for: .frameletExport)) { _ in store.exportSeparateSegments() }
+        .background(EditorKeyboardShortcuts(store: store))
         .alert("Framelet", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") {
                 store.errorMessage = nil
             }
         } message: {
             Text(store.errorMessage ?? "")
+        }
+    }
+}
+
+private struct EditorKeyboardShortcuts: NSViewRepresentable {
+    let store: EditorStore
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.install(store: store)
+        return NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.store = store
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        weak var store: EditorStore?
+        private var monitor: Any?
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        @MainActor
+        func install(store: EditorStore) {
+            self.store = store
+            guard monitor == nil else { return }
+
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.handle(event) else { return event }
+                return nil
+            }
+        }
+
+        @MainActor
+        private func handle(_ event: NSEvent) -> Bool {
+            guard let store, store.mediaInfo != nil, !isTextInputActive else { return false }
+
+            let modifierFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isShiftOnly = modifierFlags == .shift
+            let hasUnsupportedModifiers = !modifierFlags.subtracting(.shift).isEmpty
+            guard !hasUnsupportedModifiers else { return false }
+
+            switch event.keyCode {
+            case 123:
+                isShiftOnly ? store.step(by: -1) : store.stepFrame(direction: -1)
+                return true
+            case 124:
+                isShiftOnly ? store.step(by: 1) : store.stepFrame(direction: 1)
+                return true
+            default:
+                return false
+            }
+        }
+
+        @MainActor
+        private var isTextInputActive: Bool {
+            guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+            if responder is NSTextView {
+                return true
+            }
+            if let view = responder as? NSView,
+               sequence(first: view, next: { $0.superview }).contains(where: { $0 is NSTextField }) {
+                return true
+            }
+            return false
         }
     }
 }

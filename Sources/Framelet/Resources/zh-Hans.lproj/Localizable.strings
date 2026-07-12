@@ -192,3 +192,11 @@
 "Open a video or audio file to begin." = "打开视频或音频文件以开始。";
 "Exporting" = "正在导出";
 "Export progress" = "导出进度";
+"Set In and Out to create a segment." = "设置入点和出点以创建片段。";
+"In is set — move the playhead and set Out." = "已设置入点，移动播放头后设置出点。";
+"Set In before Out." = "请先设置入点。";
+"Ready to create segment." = "可以创建片段。";
+"Out must be after In." = "出点必须位于入点之后。";
+"Segment created — mark In and Out for the next segment." = "片段已创建，请标记下一段的入点和出点。";
+"That segment already exists." = "该片段已存在。";
+"Changing this boundary would duplicate an existing segment." = "调整此边界会与已有片段重复。";

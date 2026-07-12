@@ -21,6 +21,10 @@ struct SegmentInspector: View {
             }
             .buttonStyle(.bordered)
 
+            if !store.project.segments.isEmpty {
+                SegmentList(store: store)
+            }
+
             if let segment = store.selectedSegment {
                 TextField(
                     "Name",
@@ -110,33 +114,43 @@ struct SegmentInspector: View {
                     description: Text("Set in and out points, then create a segment.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 220)
-            } else {
-                InfoSection("Segments") {
-                    ForEach(store.project.segments) { segment in
-                        Button {
-                            store.selectedSegmentID = segment.id
-                            store.seek(to: segment.sourceStart)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(segment.name)
-                                        .font(.body)
-                                    Text("\(TimecodeFormatter.string(from: segment.sourceStart)) – \(TimecodeFormatter.string(from: segment.sourceEnd))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
             }
         }
         .padding(16)
+    }
+}
+
+private struct SegmentList: View {
+    @Bindable var store: EditorStore
+
+    var body: some View {
+        InfoSection("Segments") {
+            ForEach(store.project.segments) { segment in
+                Button {
+                    store.selectedSegmentID = segment.id
+                    store.seek(to: segment.sourceStart)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(segment.name)
+                                .font(.body)
+                            Text("\(TimecodeFormatter.string(from: segment.sourceStart)) – \(TimecodeFormatter.string(from: segment.sourceEnd))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if segment.id == store.selectedSegmentID {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                        }
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 

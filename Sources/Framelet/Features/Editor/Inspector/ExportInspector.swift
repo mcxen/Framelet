@@ -41,7 +41,14 @@ struct ExportInspector: View {
             }
 
             if store.isExporting {
-                ExportProgressView(progress: store.exportProgress)
+                ExportProgressView(
+                    progress: store.exportProgress,
+                    phase: store.exportPhase,
+                    currentSegment: store.exportCurrentSegment,
+                    totalSegments: store.exportSegmentCount,
+                    speed: store.exportSpeed,
+                    estimatedRemaining: store.exportEstimatedRemaining
+                )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
             }
@@ -96,6 +103,11 @@ struct ExportInspector: View {
 
 private struct ExportProgressView: View {
     let progress: Double
+    let phase: ExportPhase
+    let currentSegment: Int
+    let totalSegments: Int
+    let speed: Double?
+    let estimatedRemaining: TimeInterval?
 
     private var clampedProgress: Double {
         min(max(progress, 0), 1)
@@ -105,31 +117,60 @@ private struct ExportProgressView: View {
         Int((clampedProgress * 100).rounded())
     }
 
-    var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .stroke(.quaternary, lineWidth: 6)
-
-                Circle()
-                    .trim(from: 0, to: clampedProgress)
-                    .stroke(
-                        Color.accentColor,
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-
-                Text("\(percentage)%")
-                    .font(.system(.caption, design: .monospaced, weight: .semibold))
-            }
-            .frame(width: 60, height: 60)
-
-            Text("Exporting")
-                .font(.headline)
+    private var detail: String? {
+        if phase == .exporting, currentSegment > 0, totalSegments > 0 {
+            return "Segment \(currentSegment) of \(totalSegments)"
         }
+        if phase == .merging {
+            return "Writing the final file"
+        }
+        return nil
+    }
+
+    private var metrics: String? {
+        var values: [String] = []
+        if let speed, speed.isFinite, speed > 0 {
+            values.append(String(format: "%.1f×", speed))
+        }
+        if phase == .exporting, let estimatedRemaining, estimatedRemaining.isFinite {
+            let duration = Duration.seconds(estimatedRemaining)
+            values.append("About \(duration.formatted(.units(allowed: [.minutes, .seconds], width: .abbreviated))) left")
+        }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(phase.displayName)
+                    .font(.headline)
+                Spacer()
+                Text("\(percentage)%")
+                    .font(.system(.body, design: .monospaced, weight: .semibold))
+                    .contentTransition(.numericText())
+            }
+
+            ProgressView(value: clampedProgress)
+                .progressViewStyle(.linear)
+
+            HStack {
+                if let detail {
+                    Text(detail)
+                }
+                Spacer()
+                if let metrics {
+                    Text(metrics)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Export progress")
-        .accessibilityValue("\(percentage)%")
+        .accessibilityValue("\(phase.displayName), \(percentage)%")
     }
 }
 
@@ -234,6 +275,21 @@ private struct CropExportControls: View {
         store.mediaInfo?.videoStreams.first?.height ?? 2160
     }
 
+    private var crop: CropRectangle {
+        store.cropPreviewRectangle ?? CropRectangle(x: 0, y: 0, width: sourceWidth, height: sourceHeight)
+    }
+
+    private func binding(for keyPath: WritableKeyPath<CropRectangle, Int>) -> Binding<Int> {
+        Binding(
+            get: { crop[keyPath: keyPath] },
+            set: { value in
+                var updated = crop
+                updated[keyPath: keyPath] = value
+                store.setCropRectangle(updated)
+            }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Toggle(
@@ -251,31 +307,33 @@ private struct CropExportControls: View {
                     GridRow {
                         CropStepper(
                             title: "X",
-                            value: $store.project.exportPreset.crop.x,
+                            value: binding(for: \.x),
                             range: 0...max(0, sourceWidth - 2)
                         )
                         CropStepper(
                             title: "Y",
-                            value: $store.project.exportPreset.crop.y,
+                            value: binding(for: \.y),
                             range: 0...max(0, sourceHeight - 2)
                         )
                     }
 
                     GridRow {
-                        CropOptionalStepper(
+                        CropStepper(
                             title: "Width",
-                            value: $store.project.exportPreset.crop.width,
-                            fallback: sourceWidth,
-                            range: 2...sourceWidth
+                            value: binding(for: \.width),
+                            range: 2...max(2, sourceWidth - crop.x)
                         )
-                        CropOptionalStepper(
+                        CropStepper(
                             title: "Height",
-                            value: $store.project.exportPreset.crop.height,
-                            fallback: sourceHeight,
-                            range: 2...sourceHeight
+                            value: binding(for: \.height),
+                            range: 2...max(2, sourceHeight - crop.y)
                         )
                     }
                 }
+
+                Text("Drag the frame handles to resize, or drag inside the frame to reposition it. Values are kept inside the source image.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
                     Button("Full") {
@@ -287,8 +345,14 @@ private struct CropExportControls: View {
                     Button("16:9") {
                         store.setCenteredCrop(aspectWidth: 16, aspectHeight: 9)
                     }
+                    Button("4:3") {
+                        store.setCenteredCrop(aspectWidth: 4, aspectHeight: 3)
+                    }
                     Button("9:16") {
                         store.setCenteredCrop(aspectWidth: 9, aspectHeight: 16)
+                    }
+                    Button("3:4") {
+                        store.setCenteredCrop(aspectWidth: 3, aspectHeight: 4)
                     }
                 }
                 .buttonStyle(.bordered)
@@ -326,36 +390,11 @@ private struct CropStepper: View {
     var range: ClosedRange<Int>
 
     var body: some View {
-        Stepper(value: $value, in: range) {
+        Stepper(value: $value, in: range, step: 2) {
             HStack {
                 Text(title)
                     .foregroundStyle(.secondary)
                 Text("\(value)")
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minWidth: 52, alignment: .trailing)
-            }
-        }
-    }
-}
-
-private struct CropOptionalStepper: View {
-    var title: LocalizedStringKey
-    @Binding var value: Int?
-    var fallback: Int
-    var range: ClosedRange<Int>
-
-    var body: some View {
-        Stepper(
-            value: Binding(
-                get: { value ?? fallback },
-                set: { value = $0 }
-            ),
-            in: range
-        ) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.secondary)
-                Text("\(value ?? fallback)")
                     .font(.system(.body, design: .monospaced))
                     .frame(minWidth: 52, alignment: .trailing)
             }

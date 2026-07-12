@@ -9,7 +9,19 @@ final class ProcessRunnerTests: XCTestCase {
         XCTAssertTrue(parser.consume(Data("out_time_".utf8)).isEmpty)
         XCTAssertEqual(
             parser.consume(Data("us=1250000\nspeed=1.2x\nout_time_us=2500000\n".utf8)),
-            [1.25, 2.5]
+            [
+                FFmpegProgressUpdate(elapsed: 1.25, speed: nil),
+                FFmpegProgressUpdate(elapsed: 2.5, speed: 1.2)
+            ]
+        )
+    }
+
+    func testFFmpegProgressParserAcceptsBothTimestampKeys() {
+        let parser = FFmpegProgressParser()
+
+        XCTAssertEqual(
+            parser.consume(Data("speed=2.5x\nout_time_ms=3000000\n".utf8)),
+            [FFmpegProgressUpdate(elapsed: 3, speed: 2.5)]
         )
     }
 
